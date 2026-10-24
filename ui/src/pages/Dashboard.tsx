@@ -78,8 +78,14 @@ export function Dashboard() {
                     </td>
                     <td data-label="Last success" className="nowrap">
                       <div className="cell-value">
-                        {formatInTimeZone(target.lastBackupAt, target.timezone)}
-                        <span className="muted block">{formatRelative(target.lastBackupAt, now)}</span>
+                        {target.lastBackupAt ? (
+                          <>
+                            {formatInTimeZone(target.lastBackupAt, target.timezone)}
+                            <span className="muted block">{formatRelative(target.lastBackupAt, now)}</span>
+                          </>
+                        ) : (
+                          "-"
+                        )}
                       </div>
                     </td>
                     <td data-label="Next run" className="nowrap">
