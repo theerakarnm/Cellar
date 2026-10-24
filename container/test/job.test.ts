@@ -5,7 +5,7 @@ const base = {
   jobId: "job-1",
   type: "test",
   callbackUrl: "http://127.0.0.1:18080/internal/jobs/callback",
-  jobKey: "a2V5",
+  jobKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
   deadlineAt: "2026-10-24T04:00:00.000Z",
   db: { url: "postgres://app:s3cretpw@db:5432/shop", name: "shop" },
   tunnel: { hostname: "db.example.com", tokenId: "id-1234", tokenSecret: "tok-secret", localPort: 15432 },
@@ -56,6 +56,18 @@ describe("parseJob", () => {
     expectInvalid({ ...base, type: "backup", r2: { ...r2, key: "k", partSizeBytes: 33554432 }, tunnel: { ...tunnel, localPort: 80 } }, "tunnel.localPort");
     expectInvalid({ ...base, type: "restore", r2 }, "restore");
     expectInvalid({ ...base, type: "backup", r2: { ...r2, secretAccessKey: "" , key: "k", partSizeBytes: 33554432 } }, "r2.secretAccessKey", "sup3rsecret");
+  });
+
+  it("requires jobKey to be base64 of exactly 32 bytes and never echoes it", () => {
+    expectInvalid({ ...base, jobKey: "a2V5" }, "jobKey", "a2V5");
+    expectInvalid({ ...base, jobKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHy" }, "jobKey");
+    expectInvalid({ ...base, jobKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH_A=" }, "jobKey", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH_A=");
+  });
+
+  it("requires callbackUrl to be an http or https URL and never echoes it", () => {
+    expectInvalid({ ...base, callbackUrl: "" }, "callbackUrl");
+    expectInvalid({ ...base, callbackUrl: "worker.internal/callback" }, "callbackUrl", "worker.internal/callback");
+    expectInvalid({ ...base, callbackUrl: "ftp://worker.internal/callback" }, "callbackUrl", "ftp://worker.internal/callback");
   });
 });
 

@@ -79,6 +79,25 @@ function int(parent: Obj, key: string, path: string, min: number, max: number): 
   return value as number;
 }
 
+/** Canonical base64 of exactly 32 bytes: the HMAC key size the Worker derives from ENCRYPTION_KEY. */
+const JOB_KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
+
+function base64Key(value: string): string {
+  if (!JOB_KEY_PATTERN.test(value)) invalid("jobKey", "base64 of exactly 32 bytes");
+  return value;
+}
+
+function httpUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return invalid("callbackUrl", "an http or https URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") invalid("callbackUrl", "an http or https URL");
+  return value;
+}
+
 /** Parses the job JSON. Error messages name the bad field only, never its value. */
 export function parseJob(text: string): Job {
   let raw: unknown;
@@ -99,8 +118,8 @@ export function parseJob(text: string): Job {
   const job: Job = {
     jobId: str(root, "jobId", ""),
     type: type as JobType,
-    callbackUrl: str(root, "callbackUrl", ""),
-    jobKey: str(root, "jobKey", ""),
+    callbackUrl: httpUrl(str(root, "callbackUrl", "")),
+    jobKey: base64Key(str(root, "jobKey", "")),
     deadlineAt,
     db: { url: str(db, "url", "db."), name: str(db, "name", "db.") },
     tunnel: {

@@ -10,7 +10,14 @@ done
 
 PORT="${SPIKE_LOCAL_PORT:-15432}"
 LOG="$(mktemp)"
-redact() { sed -e "s/${TUNNEL_SERVICE_TOKEN_SECRET}/***/g" -e "s/${PGPASSWORD}/***/g"; }
+# Masks secrets via parameter substitution: nothing on argv (visible in ps), no sed pattern that breaks on / or &.
+redact() {
+  while IFS= read -r l || [ -n "$l" ]; do
+    l=${l//"$TUNNEL_SERVICE_TOKEN_SECRET"/***}
+    l=${l//"$PGPASSWORD"/***}
+    printf '%s\n' "$l"
+  done
+}
 
 cloudflared access tcp --hostname "$SPIKE_HOSTNAME" --url "127.0.0.1:${PORT}" --loglevel info >"$LOG" 2>&1 &
 CF_PID=$!
