@@ -62,8 +62,19 @@ describe("server probe", () => {
 describe("classifyConnectionFailure", () => {
   it("separates auth failures from tunnel connection failures", () => {
     expect(classifyConnectionFailure('FATAL:  password authentication failed for user "app"')).toBe("AUTH_FAILED");
+    expect(classifyConnectionFailure('FATAL:  role "app" does not exist')).toBe("AUTH_FAILED");
     expect(classifyConnectionFailure("connection to server at \"127.0.0.1\", port 15432 failed: server closed the connection unexpectedly")).toBe("TUNNEL_FAILED");
     expect(classifyConnectionFailure("connection to server at \"127.0.0.1\", port 15432 failed: Connection refused")).toBe("TUNNEL_FAILED");
     expect(classifyConnectionFailure("syntax error at or near")).toBeNull();
+  });
+
+  it("does not treat restore or dump errors about GRANTs or unreadable tables as auth failures", () => {
+    expect(classifyConnectionFailure('pg_restore: error: could not execute query: ERROR:  role "app" does not exist\nCommand was: GRANT ALL ON TABLE t TO app;')).toBeNull();
+    expect(classifyConnectionFailure('pg_dump: error: query failed: ERROR:  permission denied for table users')).toBeNull();
+    expect(classifyConnectionFailure("pg_dump: error: could not open file: permission denied")).toBeNull();
+  });
+
+  it("does not match HTTP status numbers in pg stderr", () => {
+    expect(classifyConnectionFailure("pg_dump: error: query failed at line 403 of input")).toBeNull();
   });
 });

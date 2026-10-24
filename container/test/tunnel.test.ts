@@ -76,6 +76,13 @@ describe("startTunnel", () => {
     expect((error as JobError).code).toBe("AUTH_FAILED");
   });
 
+  it("reports AUTH_FAILED for a 401 or forbidden refusal in the cloudflared log", async () => {
+    const port = await freePort();
+    const fake = fakeCloudflared(`console.error('error: 401 unauthorized'); process.exitCode = 1`);
+    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 5000 }).catch((caught: unknown) => caught);
+    expect((error as JobError).code).toBe("AUTH_FAILED");
+  });
+
   it("times out, kills the process, and reports TUNNEL_FAILED when the port never opens", async () => {
     const port = await freePort();
     const fake = fakeCloudflared(`setInterval(() => {}, 1000)`);

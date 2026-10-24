@@ -100,7 +100,8 @@ export function assertSupportedMajor(major: number, code: ErrorCode = "DUMP_FAIL
   }
 }
 
-const AUTH_PATTERN = /password authentication failed|authentication failed|no pg_hba\.conf entry|role ".*" does not exist|permission denied|\b(401|403)\b|forbidden|unauthori[sz]ed/i;
+// "role does not exist" counts only as a FATAL connection error. As an ERROR inside a dump or restore it means a GRANT names a role missing on this server.
+const AUTH_PATTERN = /password authentication failed|authentication failed|no pg_hba\.conf entry|FATAL:\s+role ".*" does not exist|permission denied for database/i;
 
 /** Maps psql / pg_dump / pg_restore connection failures to an error code. */
 export function classifyConnectionFailure(stderr: string): "AUTH_FAILED" | "TUNNEL_FAILED" | null {

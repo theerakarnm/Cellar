@@ -15,6 +15,9 @@ export interface TunnelOptions {
   start?: (command: string, args: string[], options: StartOptions) => Child;
 }
 
+/** HTTP-level refusals from the Cloudflare edge, checked only on cloudflared output. */
+const TUNNEL_AUTH_PATTERN = /forbidden|unauthori[sz]ed|\b40[13]\b/i;
+
 interface WaitOptions {
   host?: string;
   timeoutMs: number;
@@ -78,7 +81,7 @@ export async function startTunnel(input: TunnelInput, options: TunnelOptions): P
   } catch (error) {
     await stop();
     const tail = options.scrub(child.stderrTail());
-    const auth = classifyConnectionFailure(tail) === "AUTH_FAILED";
+    const auth = classifyConnectionFailure(tail) === "AUTH_FAILED" || TUNNEL_AUTH_PATTERN.test(tail);
     const reason = error instanceof Error ? error.message : "unknown";
     throw new JobError(auth ? "AUTH_FAILED" : "TUNNEL_FAILED", `Tunnel failed: ${reason}. ${tail.slice(-600)}`.trim());
   }
