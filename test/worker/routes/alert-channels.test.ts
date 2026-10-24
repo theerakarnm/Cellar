@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { app } from "../../../src/worker/app";
 import type { Env } from "../../../src/worker/env";
+import { decrypt } from "../../../src/worker/lib/crypto";
 import { seedChannel, seedTarget, WEBHOOK } from "../../helpers/alerts-seed";
 import { createTestEnv, resetDb } from "../../helpers/env";
 
@@ -53,9 +54,11 @@ describe("POST /api/alert-channels", () => {
     for (const secret of SECRETS) expect(audit?.details).not.toContain(secret);
   });
 
-  it("rejects a bad Discord host, a mismatched credential, and unknown events with 400", async () => {
+  it("rejects a bad Discord host, a non-prefix Discord path, a mismatched credential, and unknown events with 400", async () => {
     for (const body of [
       { ...discordBody, credential: { webhookUrl: "https://evil.example.com/api/webhooks/1/tok" } },
+      { ...discordBody, credential: { webhookUrl: "https://discord.com/api/v10/webhooks/1/tok" } },
+      { ...discordBody, credential: { webhookUrl: "https://discord.com:8443/api/webhooks/1/tok" } },
       { ...lineBody, credential: { webhookUrl: WEBHOOK } },
       { ...lineBody, events: ["nope"] },
     ]) {
@@ -96,6 +99,15 @@ describe("PATCH /api/alert-channels/:id", () => {
     await call("PATCH", `/api/alert-channels/${created.id}`, { credential: { webhookUrl: newUrl } });
     const after = await env.DB.prepare("SELECT credential_enc FROM alert_channels WHERE id = ?").bind(created.id).first<{ credential_enc: string }>();
     expect(after?.credential_enc).not.toBe(before?.credential_enc);
+  });
+
+  it("stores a Discord credential as the normalized href", async () => {
+    const created = (await (await call("POST", "/api/alert-channels", discordBody)).json()) as { id: string };
+    const res = await call("PATCH", `/api/alert-channels/${created.id}`, { credential: { webhookUrl: "HTTPS://DISCORD.COM\\api\\webhooks\\123456789012345678\\abcDEF_ghi-JKL" } });
+    expect(res.status).toBe(200);
+    const stored = await env.DB.prepare("SELECT credential_enc FROM alert_channels WHERE id = ?").bind(created.id).first<{ credential_enc: string }>();
+    const credential = JSON.parse(await decrypt(stored?.credential_enc ?? "", env.ENCRYPTION_KEY)) as { webhookUrl: string };
+    expect(credential.webhookUrl).toBe(WEBHOOK);
   });
 
   it("rejects a credential of the wrong shape for the stored type and an unknown id", async () => {

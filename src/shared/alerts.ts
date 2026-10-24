@@ -12,16 +12,20 @@ export type AlertEvent = (typeof ALERT_EVENTS)[number];
 /** Events that Phase 8 emits. A new channel subscribes to these unless the request says otherwise. */
 export const DEFAULT_CHANNEL_EVENTS: AlertEvent[] = ["backup_failed", "backup_stale", "backup_consecutive_failures"];
 
-const DISCORD_HOSTS = new Set(["discord.com", "discordapp.com"]);
-const DISCORD_PATH = /^\/api(\/v\d+)?\/webhooks\//;
+const DISCORD_WEBHOOK_PREFIXES = ["https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/"];
 
 export function isDiscordWebhookUrl(value: string): boolean {
+  let href: string;
   try {
-    const url = new URL(value);
-    return url.protocol === "https:" && DISCORD_HOSTS.has(url.hostname) && DISCORD_PATH.test(url.pathname);
+    href = new URL(value).href;
   } catch {
     return false;
   }
+  return DISCORD_WEBHOOK_PREFIXES.some((prefix) => {
+    if (!href.startsWith(prefix)) return false;
+    const remainder = href.slice(prefix.length);
+    return remainder.length > 0 && !remainder.startsWith("#") && !remainder.startsWith("?");
+  });
 }
 
 export const lineCredentialSchema = z.strictObject({
@@ -29,7 +33,12 @@ export const lineCredentialSchema = z.strictObject({
   to: z.string().trim().min(1).max(64),
 });
 export const discordCredentialSchema = z.strictObject({
-  webhookUrl: z.string().trim().max(512).refine(isDiscordWebhookUrl, "must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/"),
+  webhookUrl: z
+    .string()
+    .trim()
+    .max(512)
+    .refine(isDiscordWebhookUrl, "must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/")
+    .transform((v) => new URL(v).href),
 });
 export type LineCredential = z.infer<typeof lineCredentialSchema>;
 export type DiscordCredential = z.infer<typeof discordCredentialSchema>;

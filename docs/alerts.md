@@ -52,5 +52,6 @@ Set `APP_BASE_URL` in `wrangler.jsonc` `vars` (and `.dev.vars` locally).
 ## Failures
 
 If LINE or Discord rejects a message, Cellar writes one log line with the channel id and the HTTP status.
+Each send uses a 10 second request timeout and does not follow redirects.
 It never retries and never fails the backup because of an alert.
 Logs never contain tokens, webhook URLs, or connection strings.
