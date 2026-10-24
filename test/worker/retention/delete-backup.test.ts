@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
+import { writeSetting } from "../../../src/worker/retention/config";
 import { deleteBackup } from "../../../src/worker/retention/delete-backup";
+import { runRetention } from "../../../src/worker/retention/runner";
 import { createTestEnv } from "../../helpers/env";
+import { seedRestore } from "../../helpers/restore-fixtures";
 import {
+  NOW,
   auditRows,
   backupRow,
   daysAgo,
@@ -76,6 +80,34 @@ describe("deleteBackup", () => {
     expect((await del(isoOlder.id)).status).toBe(204);
   });
 
+  it("refuses while a running restore uses the backup as its source, and changes nothing", async () => {
+    const targetId = await seedTarget(t.env);
+    const old = await seedBackup(t.env, targetId, daysAgo(3));
+    await seedBackup(t.env, targetId, daysAgo(0));
+    await seedRestore(t.env, { sourceBackupId: old.id, destinationTargetId: targetId, status: "running" });
+
+    const manual = await deleteBackup(t.env, asDeletable(targetId, old), { reason: "manual", actor: "a@example.com" });
+    const retention = await deleteBackup(t.env, asDeletable(targetId, old), { reason: "retention", actor: "system" });
+
+    expect(manual).toEqual({ status: "refused_active_restore" });
+    expect(retention).toEqual({ status: "refused_active_restore" });
+    expect(await hasObject(t.env, old.r2Key)).toBe(true);
+    expect((await backupRow(t.env, old.id))?.deletedAt).toBeNull();
+    expect(await auditRows(t.env)).toEqual([]);
+  });
+
+  it("allows the delete once the restore using the backup is no longer active", async () => {
+    const targetId = await seedTarget(t.env);
+    const old = await seedBackup(t.env, targetId, daysAgo(3));
+    await seedBackup(t.env, targetId, daysAgo(0));
+    await seedRestore(t.env, { sourceBackupId: old.id, destinationTargetId: targetId, status: "success" });
+
+    const outcome = await deleteBackup(t.env, asDeletable(targetId, old), { reason: "manual", actor: "a@example.com" });
+
+    expect(outcome).toEqual({ status: "deleted" });
+    expect(await hasObject(t.env, old.r2Key)).toBe(false);
+  });
+
   it("keeps the row when the R2 delete fails, and audits only retention failures", async () => {
     const targetId = await seedTarget(t.env);
     const old = await seedBackup(t.env, targetId, daysAgo(3));
@@ -114,5 +146,26 @@ describe("deleteBackup", () => {
 
     expect(outcome).toMatchObject({ status: "r2_failed" });
     expect((await backupRow(t.env, old.id))?.deletedAt).toBeNull();
+  });
+
+  it("skips a backup with an active restore in a retention run and still processes the other rows", async () => {
+    await writeSetting(t.env, "retention_dry_run", false);
+    const targetId = await seedTarget(t.env, { keepLast: 2 });
+    const guarded = await seedBackup(t.env, targetId, daysAgo(3));
+    const other = await seedBackup(t.env, targetId, daysAgo(2));
+    await seedBackup(t.env, targetId, daysAgo(1));
+    await seedBackup(t.env, targetId, daysAgo(0));
+    await seedRestore(t.env, { sourceBackupId: guarded.id, destinationTargetId: targetId, status: "queued" });
+
+    const result = await runRetention(t.env, targetId, { now: NOW });
+
+    expect(result.dryRun).toBe(false);
+    expect(result.failed).toEqual([]);
+    expect(result.deleted).toEqual([other.id]);
+    expect(await hasObject(t.env, guarded.r2Key)).toBe(true);
+    expect((await backupRow(t.env, guarded.id))?.deletedAt).toBeNull();
+    expect(await hasObject(t.env, other.r2Key)).toBe(false);
+    expect((await backupRow(t.env, other.id))?.deletedReason).toBe("retention");
+    expect(await auditRows(t.env)).toEqual([{ action: "retention.delete", actor: "system", entityId: other.id }]);
   });
 });

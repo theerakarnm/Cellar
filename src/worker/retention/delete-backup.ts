@@ -1,6 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { backups } from "../db/schema";
+import { backups, restores } from "../db/schema";
 import type { Env } from "../env";
 import { writeAudit } from "../lib/audit";
 import { redactError } from "../lib/redact";
@@ -21,12 +21,23 @@ export async function findLatestSuccessId(db: Db, targetId: string): Promise<str
   return latest?.id ?? null;
 }
 
+/** True while a queued or running restore still reads this backup from R2, so the dump must stay in place. */
+export async function hasActiveRestore(db: Db, backupId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: restores.id })
+    .from(restores)
+    .where(and(eq(restores.sourceBackupId, backupId), inArray(restores.status, ["queued", "running"])))
+    .limit(1);
+  return row !== undefined;
+}
+
 export type DeleteReason = "retention" | "manual";
 
 export type DeleteOutcome =
   | { status: "deleted" }
   | { status: "already_deleted" }
   | { status: "refused_latest_success" }
+  | { status: "refused_active_restore" }
   | { status: "r2_failed"; error: string };
 
 export interface DeletableBackup {
@@ -43,6 +54,7 @@ const AUDIT_ACTIONS: Record<DeleteReason, { ok: string; failed: string | null }>
 /**
  * The single delete routine, shared by the retention runner and DELETE /api/backups/:id.
  * Order is fixed: R2 object first, then the D1 soft delete, then the audit row.
+ * The latest-success and active-restore guards refuse before anything is touched.
  * A D1 error after the R2 delete is thrown to the caller; the next run repeats the (idempotent) R2 delete and heals it.
  */
 export async function deleteBackup(
@@ -56,6 +68,9 @@ export async function deleteBackup(
 
   if ((await findLatestSuccessId(db, backup.targetId)) === backup.id) {
     return { status: "refused_latest_success" };
+  }
+  if (await hasActiveRestore(db, backup.id)) {
+    return { status: "refused_active_restore" };
   }
 
   try {

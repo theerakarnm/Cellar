@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
 import { createTestEnv } from "../../helpers/env";
+import { seedRestore } from "../../helpers/restore-fixtures";
 import { auditRows, backupRow, daysAgo, failingR2, hasObject, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
@@ -60,6 +61,20 @@ describe("DELETE /api/backups/:id", () => {
     expect(res.status).toBe(409);
     expect(await hasObject(t.env, latest.r2Key)).toBe(true);
     expect((await backupRow(t.env, latest.id))?.deletedAt).toBeNull();
+  });
+
+  it("returns 409 backup_in_use while a restore is queued from the backup, and changes nothing", async () => {
+    const { targetId, old } = await seedTwo();
+    await seedRestore(t.env, { sourceBackupId: old.id, destinationTargetId: targetId, status: "queued" });
+
+    const res = await del(old.id);
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("backup_in_use");
+    expect(await hasObject(t.env, old.r2Key)).toBe(true);
+    expect((await backupRow(t.env, old.id))?.deletedAt).toBeNull();
+    expect(await auditRows(t.env)).toEqual([]);
   });
 
   it("refuses a backup that is not a success", async () => {

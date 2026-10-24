@@ -34,6 +34,9 @@ backupDeleteRoutes.delete("/backups/:id", async (c) => {
   if (outcome.status === "refused_latest_success") {
     throw new ApiError(409, "conflict", "The most recent successful backup cannot be deleted", { reason: "latest_success" });
   }
+  if (outcome.status === "refused_active_restore") {
+    throw new ApiError(409, "backup_in_use", "A restore is queued or running from this backup; wait for it to finish before deleting");
+  }
   if (outcome.status === "r2_failed") {
     return c.json(
       {
