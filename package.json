@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p container",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply cellar --local",
     "db:migrate:remote": "wrangler d1 migrations apply cellar --remote",
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261024.1",
+    "@types/bun": "^1.4.4",
     "drizzle-kit": "^0.31.11",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
