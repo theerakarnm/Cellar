@@ -5,6 +5,7 @@ import { errorHandler, notFoundHandler } from "./middleware/error";
 import { internal } from "./routes/internal";
 import { auditLogRoutes } from "./routes/audit-logs";
 import { settingsRoutes } from "./routes/settings";
+import { targetJobs } from "./routes/target-jobs";
 import { targetRoutes } from "./routes/targets";
 
 export const app = new Hono<AppEnv>();
@@ -16,6 +17,7 @@ app.notFound(notFoundHandler);
 app.get("/api/health", (c) => c.json({ ok: true, version: pkg.version }));
 app.use("/api/*", access());
 app.route("/api/targets", targetRoutes);
+app.route("/api/targets", targetJobs);
 app.route("/api/audit-logs", auditLogRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/internal", internal);
