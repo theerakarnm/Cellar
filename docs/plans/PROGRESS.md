@@ -64,3 +64,22 @@ Deviations from the plan:
 - Callback fetch has a 15 s timeout, abortMultipart a 30 s timeout, parseJob validates jobKey and callbackUrl.
 Deferred items (see /tmp/cellar-p4-gate2.md): s3 pause() listener cleanup, cancel callback response bodies, restore guard before startTunnel, Decision 11 exit-code wording, restore memory proof before Phase 7, pg stderr tails may carry row data into callbacks, amd64 memory number unmeasured.
 Pending for the owner: run Task 2 (SPIKE OK) and Task 18 before relying on the tunnel path.
+
+## Phase 5 - Orchestration (cron, queue, container, callback)
+Tasks done: 11 plan tasks plus 6 fix tasks (haiku and glm).
+Task 1 (callback spike) was run but inconclusive, see below.
+Sonnet review rounds: 2 (no blockers).
+Opus verdict: round 1 FAIL (1 blocker), round 2 PASS with the container and outbound path unverified.
+Round 1 blocker: the callback schema rejected hasReadAllData null from PG13 test jobs.
+Fixed with a test using the real shape.
+Also fixed: stopJob when startJob fails, re-send of a still-queued same-slot backup, failJob only for still-queued rows when the re-send fails.
+Spike (Task 1): INCONCLUSIVE.
+wrangler dev under podman cannot start the egress sidecar (crun: cannot set memory swappiness with cgroupv2), so the container never ran.
+The outbound-handler callback path and the container-dependent manual e2e are NOT verified.
+Default kept: empty CALLBACK_BASE_URL, outbound intercept, with the documented fallback config.
+Confirm with Docker Desktop or on a deployed Worker.
+Deviations: ApiErrorStatus gained 503 and 413.
+lib/cursor.ts not created (Phase 2 pagination.ts has the helpers).
+ApiError import path is lib/api-error.ts.
+Deferred MINOR items (see /tmp/cellar-p5-gate1.md and gate2): sweeper stale-heartbeat update race, late success after timed_out keeps r2_key (hand off to Phase 6), no dead letter queue, audit written after queue send, blocked targets unlogged, byte-size check on queue messages, double catch around stopJob.
+Owner decision needed: the default schedule is 02:00 for every target with max_concurrent_jobs 1 and a one-hour queue_timeout, so about 6 or more targets fail every night unless schedules are staggered or the limit is raised.
