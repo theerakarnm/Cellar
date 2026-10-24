@@ -131,3 +131,22 @@ Restore busy check is not atomic (tiny window).
 Sweeper code TIMEOUT differs from the backup codes.
 Plan doc gotcha lines 1323 and 1354 are stale.
 
+## Phase 8 - Alerts (LINE, Discord, staleness)
+Tasks done: 13 plan tasks plus 3 fix tasks (haiku and glm).
+Sonnet review rounds: 3 (no findings in the last).
+Opus verdict: round 1 FAIL (1 blocker), round 2 PASS.
+Round 1 blocker: the Discord webhook check accepted custom ports, userinfo and /api/v10/ paths, which broke the locked rule that URLs must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/.
+Fixed: exact-prefix check on the normalized href, the normalized URL is stored and sent.
+The test that asserted /api/v10/ is accepted was flipped (correction to the locked rule, not a weakening).
+Other fixes: the sweeper stops the container before waiting on an alert (a hung webhook no longer delays it), no alert for a soft-deleted target, a callback test now asserts its status.
+Opus checked: no credential leak with a hostile server or a throwing fetch, failure counters exact under concurrency with exactly one consecutive-failures alert, callback answers in 22 ms with a hung webhook, staleness edge cases.
+Deviations: alert sends use a 10 second timeout and do not follow redirects (documented in docs/alerts.md).
+The LINE push endpoint was checked against LINE docs only partly.
+Real LINE and Discord delivery was NOT run (needs real tokens and a webhook).
+Deferred MINOR items: later rows in the same sweep still wait about 20 s each on a hung webhook.
+max(512) on the webhook URL is checked before normalization.
+Re-enabling a long-disabled target sends a stale alert on the next tick.
+The notify hook is not idempotent per backup id (all call sites gate on the applied update).
+Staleness runs inside the cron after runCronTick steps (each step is wrapped).
+Owner action: set APP_BASE_URL for the deployed Worker, create channels, and send a test message from the UI or POST /api/alert-channels/:id/test to confirm real delivery.
+
