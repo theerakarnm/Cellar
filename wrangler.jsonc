@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cellar",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Placeholder IDs and names. Replace with real values only after the owner approves creating the resources.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cellar",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "cellar-backups" }],
+  "queues": { "producers": [{ "binding": "JOBS", "queue": "cellar-jobs" }] }
+}
