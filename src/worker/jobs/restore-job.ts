@@ -30,9 +30,10 @@ async function failRestore(db: Db, id: string, code: string, message: string, no
 }
 
 /**
- * Queue consumer branch for restore messages. Idempotent: only a `queued` row is started.
- * The row stays `queued` until the container sends its `started` callback. Never logs the payload: it holds
- * the restore URL password, the tunnel secret, the job key, and the R2 secret.
+ * Queue consumer branch for restore messages. The row moves `queued` -> `running` in one conditional UPDATE before
+ * the container starts, so a duplicate delivery finds no `queued` row and is skipped without touching the container.
+ * A failed start flips the row back to `queued` while attempts remain, so the queue retry can claim it again.
+ * Never logs the payload: it holds the restore URL password, the tunnel secret, the job key, and the R2 secret.
  */
 export async function runRestoreJob(env: Env, message: { jobId: string; attempts: number }, now = new Date()): Promise<RestoreJobOutcome> {
   const db = getDb(env);
@@ -79,12 +80,25 @@ export async function runRestoreJob(env: Env, message: { jobId: string; attempts
     restore: { sourceKey: backup.r2Key, targetDbName },
   };
 
+  const claimed = await db
+    .update(restores)
+    .set({ status: "running", startedAt: now.toISOString(), heartbeatAt: now.toISOString() })
+    .where(and(eq(restores.id, restore.id), eq(restores.status, "queued")))
+    .returning({ id: restores.id });
+  if (claimed.length === 0) return "skipped";
+
   try {
     await startJob(env, payload);
     return "started";
   } catch (error) {
     await stopJob(env, restore.id);
-    if (message.attempts < MAX_START_ATTEMPTS) return "retry";
+    if (message.attempts < MAX_START_ATTEMPTS) {
+      await db
+        .update(restores)
+        .set({ status: "queued", startedAt: null, heartbeatAt: null })
+        .where(and(eq(restores.id, restore.id), eq(restores.status, "running")));
+      return "retry";
+    }
     return failRestore(db, restore.id, "start_failed", redactError(error), now);
   }
 }

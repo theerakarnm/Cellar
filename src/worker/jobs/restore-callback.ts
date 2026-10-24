@@ -19,7 +19,7 @@ export type RestoreCallbackResult = "not_a_restore" | "ignored" | "applied";
 const MAX_ERROR_MESSAGE_LENGTH = 1000;
 
 function errorCodeOf(code: string | undefined): string {
-  return code !== undefined && /^[A-Z_]{1,40}$/.test(code) ? code : "UNKNOWN";
+  return code !== undefined && /^[A-Z][A-Z0-9_]{0,39}$/.test(code) ? code : "UNKNOWN";
 }
 
 /**
@@ -39,8 +39,8 @@ export async function handleRestoreCallback(db: Db, body: CallbackBody, now = ne
   switch (body.event) {
     case "started":
       return done(
-        await db.update(restores).set({ status: "running", startedAt: at, heartbeatAt: at, lastSeq: body.seq })
-          .where(and(fresh, eq(restores.status, "queued"))).returning({ id: restores.id }),
+        await db.update(restores).set({ startedAt: at, heartbeatAt: at, lastSeq: body.seq })
+          .where(and(fresh, eq(restores.status, "running"))).returning({ id: restores.id }),
       );
     case "progress":
       return done(

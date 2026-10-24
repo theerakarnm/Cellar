@@ -5,6 +5,8 @@ import { backups, restores } from "../../../src/worker/db/schema";
 import type { Env } from "../../../src/worker/env";
 import { handleJobMessage, type QueueMessageLike } from "../../../src/worker/jobs/consumer";
 import { MAX_START_ATTEMPTS, runRestoreJob } from "../../../src/worker/jobs/restore-job";
+import { handleRestoreCallback } from "../../../src/worker/jobs/restore-callback";
+import { sweepRestores } from "../../../src/worker/jobs/restore-sweeper";
 import * as runner from "../../../src/worker/jobs/runner-client";
 import { createTestEnv } from "../../helpers/env";
 import { seedBackup, seedRestore, seedTarget, TEST_R2 } from "../../helpers/restore-fixtures";
@@ -71,7 +73,36 @@ describe("runRestoreJob", () => {
     });
     expect(payload?.db.url).toContain("restore_user:restore-pass-1@127.0.0.1:");
     expect(payload?.db.url).not.toContain("backup-pass-1");
-    expect((await rowOf(restore.id))?.status).toBe("queued");
+    expect(await rowOf(restore.id)).toMatchObject({ status: "running", startedAt: NOW.toISOString(), heartbeatAt: NOW.toISOString() });
+  });
+
+  it("starts the container once when the same message is delivered twice, and never stops it", async () => {
+    const { restore } = await queuedRestore();
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 1 }, NOW)).toBe("started");
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 2 }, NOW)).toBe("skipped");
+    expect(startJob).toHaveBeenCalledTimes(1);
+    expect(runner.stopJob).not.toHaveBeenCalled();
+    expect((await rowOf(restore.id))?.status).toBe("running");
+  });
+
+  it("returns a start failure to queued and starts again on the retry", async () => {
+    const { restore } = await queuedRestore();
+    startJob.mockRejectedValueOnce(new Error("no capacity"));
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 1 }, NOW)).toBe("retry");
+    expect(await rowOf(restore.id)).toMatchObject({ status: "queued", startedAt: null, heartbeatAt: null });
+    expect(runner.stopJob).toHaveBeenCalledWith(expect.anything(), restore.id);
+
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 2 }, NOW)).toBe("started");
+    expect(startJob).toHaveBeenCalledTimes(2);
+    expect((await rowOf(restore.id))?.status).toBe("running");
+  });
+
+  it("fails the restore when the container cannot start at the last attempt", async () => {
+    const { restore } = await queuedRestore();
+    startJob.mockRejectedValue(new Error("no capacity"));
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: MAX_START_ATTEMPTS }, NOW)).toBe("failed");
+    expect(await rowOf(restore.id)).toMatchObject({ status: "failed", errorCode: "start_failed" });
+    expect(runner.stopJob).toHaveBeenCalledTimes(1);
   });
 
   it("fails the restore when the source backup was deleted after it was queued", async () => {
@@ -127,5 +158,17 @@ describe("handleJobMessage - restore", () => {
     await handleJobMessage(env, msg, { now: () => NOW, startJob: vi.fn(), stopJob: vi.fn() });
     expect(msg.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
     expect(msg.ack).not.toHaveBeenCalled();
+  });
+});
+
+describe("restore row after a lost started callback", () => {
+  it("stays running past the queue timeout while progress keeps arriving, so the queue sweeper does not fail a live restore", async () => {
+    const { restore } = await queuedRestore();
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 1 }, NOW)).toBe("started");
+    const later = new Date(NOW.getTime() + 61 * 60_000);
+    await handleRestoreCallback(getDb(env), { jobId: restore.id, event: "progress", at: later.toISOString(), seq: 1 }, later);
+    await sweepRestores(env, later);
+    expect(await rowOf(restore.id)).toMatchObject({ status: "running", errorCode: null });
+    expect(runner.stopJob).not.toHaveBeenCalled();
   });
 });
