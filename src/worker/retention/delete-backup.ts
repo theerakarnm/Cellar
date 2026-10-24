@@ -1,23 +1,24 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { backups } from "../db/schema";
 import type { Env } from "../env";
 import { writeAudit } from "../lib/audit";
 import { redactError } from "../lib/redact";
+import { backupTime, compareBackupTime } from "./plan";
 
 export type Db = ReturnType<typeof getDb>;
 
-/** A backup's time for ordering and retention: `started_at`, or `queued_at` when it never started. */
-export const backupTime = sql<string>`coalesce(${backups.startedAt}, ${backups.queuedAt})`;
-
+/** Latest live success under the same shared ordering the planner uses, so the guard can never disagree with the plan. */
 export async function findLatestSuccessId(db: Db, targetId: string): Promise<string | null> {
-  const row = await db
-    .select({ id: backups.id })
+  const rows = await db
+    .select({ id: backups.id, startedAt: backupTime })
     .from(backups)
-    .where(and(eq(backups.targetId, targetId), eq(backups.status, "success"), isNull(backups.deletedAt)))
-    .orderBy(desc(backupTime), desc(backups.id))
-    .get();
-  return row?.id ?? null;
+    .where(and(eq(backups.targetId, targetId), eq(backups.status, "success"), isNull(backups.deletedAt)));
+  let latest: { id: string; startedAt: string } | null = null;
+  for (const row of rows) {
+    if (!latest || compareBackupTime(latest, row) < 0) latest = row;
+  }
+  return latest?.id ?? null;
 }
 
 export type DeleteReason = "retention" | "manual";

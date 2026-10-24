@@ -1,6 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { backups, targets } from "../db/schema";
-import { backupTime, type Db } from "./delete-backup";
+import type { Db } from "./delete-backup";
 import { selectBackupsToDelete } from "./gfs";
 import type { RetentionBackup, RetentionPolicy } from "./types";
 
@@ -26,6 +26,17 @@ export function toIsoUtc(value: string): string {
   return new Date(withZone).toISOString();
 }
 
+/** A backup's time for ordering and retention: `started_at`, or `queued_at` when it never started. */
+export const backupTime = sql<string>`coalesce(${backups.startedAt}, ${backups.queuedAt})`;
+
+/**
+ * The one backup ordering, oldest first: time compared after `toIsoUtc`, then id as the tie-break.
+ * The retention plan and the latest-success guard must order rows identically, so both sort with this.
+ */
+export function compareBackupTime(a: { id: string; startedAt: string }, b: { id: string; startedAt: string }): number {
+  return toIsoUtc(a.startedAt).localeCompare(toIsoUtc(b.startedAt)) || a.id.localeCompare(b.id);
+}
+
 export async function loadActiveTarget(db: Db, targetId: string): Promise<TargetRow | undefined> {
   return db
     .select()
@@ -41,8 +52,8 @@ export async function planRetention(db: Db, target: TargetRow, now: Date): Promi
       .from(backups)
       .where(and(eq(backups.targetId, target.id), eq(backups.status, "success"), isNull(backups.deletedAt)))
   )
-    .map((r) => ({ id: r.id, r2Key: r.r2Key, sizeBytes: r.sizeBytes, startedAt: toIsoUtc(r.startedAt) }))
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id));
+    .sort(compareBackupTime)
+    .map((r) => ({ id: r.id, r2Key: r.r2Key, sizeBytes: r.sizeBytes, startedAt: toIsoUtc(r.startedAt) }));
 
   const input: RetentionBackup[] = rows.map((r) => ({ id: r.id, status: "success", created_at: r.startedAt }));
   const policy: RetentionPolicy = {

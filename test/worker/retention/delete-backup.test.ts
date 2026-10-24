@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { app } from "../../../src/worker/app";
 import { deleteBackup } from "../../../src/worker/retention/delete-backup";
 import { createTestEnv } from "../../helpers/env";
 import {
@@ -20,6 +21,13 @@ afterEach(async () => {
 });
 
 const asDeletable = (targetId: string, b: { id: string; r2Key: string }) => ({ id: b.id, targetId, r2Key: b.r2Key });
+
+const del = (id: string, env = t.env) =>
+  app.request(
+    `http://localhost/api/backups/${id}`,
+    { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) },
+    env,
+  );
 
 describe("deleteBackup", () => {
   it("removes the object, soft-deletes the row, and writes one audit row", async () => {
@@ -49,6 +57,23 @@ describe("deleteBackup", () => {
     expect(await hasObject(t.env, latest.r2Key)).toBe(true);
     expect((await backupRow(t.env, latest.id))?.deletedAt).toBeNull();
     expect(await auditRows(t.env)).toEqual([]);
+  });
+
+  it("guards a zone-less timestamp row that raw string order would rank below an older ISO row", async () => {
+    const targetId = await seedTarget(t.env);
+    // "2026-06-15 12:00:00" is the true latest (12:00 UTC), but in raw string order the space sorts
+    // before "T", so the 11:00 ISO row looks newer and the old SQL guard would have allowed this delete.
+    const trueLatest = await seedBackup(t.env, targetId, "2026-06-15 12:00:00");
+    const isoOlder = await seedBackup(t.env, targetId, "2026-06-15T11:00:00.000Z");
+
+    const res = await del(trueLatest.id);
+
+    expect(res.status).toBe(409);
+    expect(await hasObject(t.env, trueLatest.r2Key)).toBe(true);
+    expect((await backupRow(t.env, trueLatest.id))?.deletedAt).toBeNull();
+
+    // The older ISO row stays deletable, so the guard is not over-refusing.
+    expect((await del(isoOlder.id)).status).toBe(204);
   });
 
   it("keeps the row when the R2 delete fails, and audits only retention failures", async () => {
