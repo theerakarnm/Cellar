@@ -13,5 +13,22 @@
     }
   ],
   "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "cellar-backups" }],
-  "queues": { "producers": [{ "binding": "JOBS", "queue": "cellar-jobs" }] }
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "cellar-jobs" }],
+    "consumers": [{ "queue": "cellar-jobs", "max_batch_size": 1, "max_retries": 100 }]
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  // Placeholders. Local development overrides them in .dev.vars. Never commit a real account id.
+  "vars": { "R2_BUCKET": "cellar-backups", "R2_ENDPOINT": "https://ACCOUNT_ID.r2.cloudflarestorage.com" },
+  "containers": [
+    {
+      "class_name": "JobRunner",
+      "image": "./container/Dockerfile",
+      "image_build_context": "./container",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "JOB_RUNNER", "class_name": "JobRunner" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["JobRunner"] }]
 }

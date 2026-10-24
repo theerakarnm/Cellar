@@ -13,3 +13,19 @@ ACCESS_AUD=
 # Local development only. "true" skips Access verification for requests to localhost.
 # Leave empty everywhere else.
 DEV_BYPASS=
+
+# R2 S3 credentials injected into each job's container. Create a bucket-scoped token
+# (Object Read & Write on the backup bucket only). Never reuse an account-wide token.
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# Local development only: point the container at RustFS (test and dev only) from test/docker-compose.test.yml.
+# These override the placeholder vars in wrangler.jsonc. Example values:
+#   R2_ENDPOINT=http://host.docker.internal:9000
+#   R2_BUCKET=cellar-test
+
+# Public URL of this Worker for container callbacks. Leave empty to use the outbound handler
+# (the container calls http://cellar-callback.internal and the Worker intercepts it).
+# Set it only if the outbound handler does not work; then also add an Access bypass for the
+# exact path /internal/jobs/callback.
+CALLBACK_BASE_URL=

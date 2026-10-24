@@ -21,7 +21,7 @@ describe("createTestEnv", () => {
   it("provides working R2 and Queue bindings", async () => {
     await env.BACKUPS.put("probe", "hello");
     expect(await (await env.BACKUPS.get("probe"))?.text()).toBe("hello");
-    await env.JOBS.send({ probe: true });
+    await env.JOBS.send({ jobId: "probe-job", type: "test", targetId: "probe-target" });
   });
 
   it("resetDb empties tables", async () => {

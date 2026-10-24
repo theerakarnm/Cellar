@@ -42,6 +42,10 @@ export async function createTestEnv(overrides: Partial<Env> = {}): Promise<{ env
     ACCESS_TEAM_DOMAIN: "test.cloudflareaccess.com",
     ACCESS_AUD: "test-aud",
     DEV_BYPASS: "true",
+    R2_ENDPOINT: "http://rustfs.test:9000",
+    R2_BUCKET: "cellar-test",
+    R2_ACCESS_KEY_ID: "test-access-key",
+    R2_SECRET_ACCESS_KEY: "test-secret-key",
     ...overrides,
   };
   return { env, dispose: () => proxy.dispose() };
