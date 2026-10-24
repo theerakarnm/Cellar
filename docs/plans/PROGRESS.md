@@ -83,3 +83,26 @@ lib/cursor.ts not created (Phase 2 pagination.ts has the helpers).
 ApiError import path is lib/api-error.ts.
 Deferred MINOR items (see /tmp/cellar-p5-gate1.md and gate2): sweeper stale-heartbeat update race, late success after timed_out keeps r2_key (hand off to Phase 6), no dead letter queue, audit written after queue send, blocked targets unlogged, byte-size check on queue messages, double catch around stopJob.
 Owner decision needed: the default schedule is 02:00 for every target with max_concurrent_jobs 1 and a one-hour queue_timeout, so about 6 or more targets fail every night unless schedules are staggered or the limit is raised.
+
+## Phase 6 - Retention runner (R2 and D1)
+Tasks done: 11 plan tasks plus 2 fix tasks and 1 flaky-test fix (haiku and glm).
+Sonnet review rounds: 1 (no blockers).
+Opus verdict: PASS (round 1, 0 blockers).
+Safety checks by opus: 18 adversarial scratch tests.
+The latest successful backup is never deleted on any path (scheduled, after-backup, manual).
+Dry run is ON by default.
+R2 object is deleted first, then the D1 soft delete.
+Fixed after the gate: the latest-success guard and the planner now share one ordering (compareBackupTime in plan.ts), with a zone-less timestamp regression test.
+Fixed flaky test: the Phase 5 sweeper test created a new workerd per test and could time out under load.
+It now creates one test env per file.
+Local end-to-end (wrangler dev with --enable-containers=false, local D1 and R2): preview, dry run, live run, manual delete and audit rows all verified.
+Deviations: wiring of the callback hook lives in routes/internal.ts.
+ApiErrorStatus lacks 502, so r2_delete_failed is returned directly.
+Deferred MINOR items: orphaned R2 objects for timed_out or failed rows with an r2_key (future phase or README note).
+Persistently failing rows count against the 50 per run cap and can delay later deletions.
+Manual delete also works on a soft-deleted target's backups (owner decision).
+Phase 7 must guard deleteBackup against an active restore.
+Stale comment in jobs/cron.ts.
+target-jobs.ts listing sorts by a raw coalesce string (display only).
+Owner action at deploy: retention deletes nothing until retention_dry_run is set to false.
+
