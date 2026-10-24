@@ -45,6 +45,7 @@ export function Dashboard() {
               No targets yet. <Link to="/targets/new">Add the first one</Link>.
             </p>
           ) : (
+            <div className="table-scroll">
             <table className="stack">
               <thead>
                 <tr>
@@ -59,7 +60,7 @@ export function Dashboard() {
               <tbody>
                 {rows.map(({ target, health }) => (
                   <tr key={target.id} className={isRedHealth(health) ? "row-red" : ""}>
-                    <td data-label="Target">
+                    <td data-label="Target" className="cell-wrap">
                       <div className="cell-value">
                         <Link to={`/targets/${target.id}`}>{target.name}</Link>
                         {target.projectTag ? <span className="tag">{target.projectTag}</span> : null}
@@ -94,6 +95,7 @@ export function Dashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </>
       ) : null}

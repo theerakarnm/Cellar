@@ -41,6 +41,7 @@ function RestoreForm({ backup, source, targets, onClose }: { backup: Backup; sou
 
   const destination = targets.find((t) => t.id === destinationId);
   const sameDatabase = destination !== undefined && destination.id === backup.targetId;
+  const finished = run !== undefined && isTerminalStatus(run.status);
   const ready = canSubmitRestore({ typedName, destinationName: destination?.name ?? "", sameDatabase, acknowledged });
 
   async function submit() {
@@ -114,7 +115,7 @@ function RestoreForm({ backup, source, targets, onClose }: { backup: Backup; sou
           {run.errorMessage ? `: ${run.errorMessage}` : ""}
         </p>
       ) : null}
-      {busy || restoreId !== undefined ? (
+      {!finished && (busy || restoreId !== undefined) ? (
         <p className="hint" role="status">
           The restore continues in the background if you close this dialog. This page does not show its result after you close it.
         </p>

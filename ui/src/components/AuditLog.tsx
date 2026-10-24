@@ -49,6 +49,7 @@ export function AuditLog() {
       <ErrorNote error={first.error ?? error} />
       {first.data && entries.length === 0 ? <p className="muted">No entries.</p> : null}
       {entries.length > 0 ? (
+        <div className="table-scroll">
         <table className="stack">
           <thead>
             <tr>
@@ -62,12 +63,12 @@ export function AuditLog() {
           <tbody>
             {entries.map((entry) => (
               <tr key={entry.id}>
-                <td data-label="When">{formatInTimeZone(entry.at, timeZoneForAudit(entry.entityType, entry.entityId, targets.data ?? []))}</td>
-                <td data-label="Actor">{entry.actor}</td>
+                <td data-label="When" className="nowrap">{formatInTimeZone(entry.at, timeZoneForAudit(entry.entityType, entry.entityId, targets.data ?? []))}</td>
+                <td data-label="Actor" className="cell-wrap">{entry.actor}</td>
                 <td data-label="Action" className="mono">
                   {entry.action}
                 </td>
-                <td data-label="Entity" className="mono">
+                <td data-label="Entity" className="mono cell-wrap">
                   <span title={entry.entityId ?? undefined}>
                     {entry.entityId ? `${entry.entityType} ${shortId(entry.entityId)}` : entry.entityType}
                   </span>
@@ -91,6 +92,7 @@ export function AuditLog() {
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       {nextCursor ? (
         <p>

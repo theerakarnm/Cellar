@@ -26,6 +26,7 @@ export function Targets() {
         </div>
       ) : null}
       {targets.data && targets.data.length > 0 ? (
+        <div className="table-scroll">
         <table className="stack">
           <thead>
             <tr>
@@ -39,11 +40,11 @@ export function Targets() {
           <tbody>
             {targets.data.map((target) => (
               <tr key={target.id}>
-                <td data-label="Name">
+                <td data-label="Name" className="cell-wrap">
                   <Link to={`/targets/${target.id}`}>{target.name}</Link>
                   {target.projectTag ? <span className="tag">{target.projectTag}</span> : null}
                 </td>
-                <td data-label="Database" className="mono">
+                <td data-label="Database" className="mono cell-wrap">
                   {connectionLabel(target.connection)}
                 </td>
                 <td data-label="Schedule" className="mono">
@@ -57,6 +58,7 @@ export function Targets() {
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
     </>
   );

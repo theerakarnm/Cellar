@@ -43,6 +43,7 @@ export function ChannelsSection() {
       <ErrorNote error={channels.error ?? error} />
       {channels.data?.length === 0 ? <p className="muted">No channels. Targets with no linked channel get no alerts.</p> : null}
       {channels.data && channels.data.length > 0 ? (
+        <div className="table-scroll">
         <table className="stack">
           <thead>
             <tr>
@@ -56,7 +57,7 @@ export function ChannelsSection() {
           <tbody>
             {channels.data.map((channel) => (
               <tr key={channel.id}>
-                <td data-label="Name">{channel.name}</td>
+                <td data-label="Name" className="cell-wrap">{channel.name}</td>
                 <td data-label="Type">{channel.type}</td>
                 <td data-label="Credential">
                   <SecretBadge isSet={channel.hasCredential} />
@@ -78,6 +79,7 @@ export function ChannelsSection() {
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       <Dialog open={editing !== undefined} title={editing?.id ? "Edit channel" : "Add channel"} onClose={() => setEditing(undefined)}>
         {editing ? (

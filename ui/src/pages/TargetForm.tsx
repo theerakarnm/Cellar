@@ -44,7 +44,7 @@ function TargetFormBody({ mode, target, channels }: { mode: "create" | "edit"; t
       type={props.type ?? "text"}
       inputMode={props.inputMode}
       placeholder={props.placeholder}
-      autoComplete="off"
+      autoComplete={props.type === "password" ? "new-password" : "off"}
       aria-invalid={shown(key) ? true : undefined}
       onChange={(e) => set(key, e.target.value)}
       onBlur={() => setTouched((prev) => new Set(prev).add(key))}

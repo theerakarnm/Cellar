@@ -164,6 +164,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
             {preview.dryRun ? "Dry run is ON: nothing is deleted yet." : "Dry run is OFF: these backups will be deleted at the next retention run."}
           </p>
           {rows.length > 0 ? (
+            <div className="table-scroll">
             <table className="stack">
               <thead>
                 <tr>
@@ -179,15 +180,16 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                     <td data-label="Backup" className="mono" title={row.id}>
                       {shortId(row.id)}
                     </td>
-                    <td data-label="Started">{formatInTimeZone(row.startedAt, tz)}</td>
+                    <td data-label="Started" className="nowrap">{formatInTimeZone(row.startedAt, tz)}</td>
                     <td data-label="Size" className="num size">
                       {formatBytes(row.sizeBytes)}
                     </td>
-                    <td data-label="Reason">{row.reasons.join(", ")}</td>
+                    <td data-label="Reason" className="cell-wrap">{row.reasons.join(", ")}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           ) : null}
         </>
       ) : null}
@@ -197,6 +199,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
       <Loading loading={first.loading} hasData={first.data !== undefined} />
       {first.data && backups.length === 0 ? <p className="muted">No backups yet.</p> : null}
       {backups.length > 0 ? (
+        <div className="table-scroll">
         <table className="stack">
           <thead>
             <tr>
@@ -212,7 +215,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
           <tbody>
             {backups.map((backup) => (
               <tr key={backup.id} className={backup.status === "failed" || backup.status === "timed_out" ? "row-red" : ""}>
-                <td data-label="Started">{formatInTimeZone(backup.startedAt ?? backup.queuedAt, tz)}</td>
+                <td data-label="Started" className="nowrap">{formatInTimeZone(backup.startedAt ?? backup.queuedAt, tz)}</td>
                 <td data-label="Status">
                   <StatusBadge status={backup.status} />
                 </td>
@@ -220,8 +223,8 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                 <td data-label="Size" className="num size">
                   {formatBytes(backup.sizeBytes)}
                 </td>
-                <td data-label="Duration">{formatDuration(backup.durationMs)}</td>
-                <td data-label="Error">{backup.errorMessage ?? "-"}</td>
+                <td data-label="Duration" className="nowrap">{formatDuration(backup.durationMs)}</td>
+                <td data-label="Error" className="cell-wrap">{backup.errorMessage ?? "-"}</td>
                 <td className="cell-actions">
                   {backup.status === "success" ? (
                     <div className="inline-actions">
@@ -238,6 +241,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       {nextCursor ? (
         <p>
