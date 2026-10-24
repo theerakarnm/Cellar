@@ -3,6 +3,7 @@ import pkg from "../../package.json";
 import { access, type AppEnv } from "./middleware/access";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import { auditLogRoutes } from "./routes/audit-logs";
+import { settingsRoutes } from "./routes/settings";
 import { targetRoutes } from "./routes/targets";
 
 export const app = new Hono<AppEnv>();
@@ -15,3 +16,4 @@ app.get("/api/health", (c) => c.json({ ok: true, version: pkg.version }));
 app.use("/api/*", access());
 app.route("/api/targets", targetRoutes);
 app.route("/api/audit-logs", auditLogRoutes);
+app.route("/api/settings", settingsRoutes);
