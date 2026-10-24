@@ -1,6 +1,6 @@
 # Cellar
 
-> Every Postgres, aged and cellart safe.
+> Every Postgres, aged and kept safe.
 
 **Cellar** is an open source, Cloudflare-native platform that backs up all your self-hosted PostgreSQL databases to Cloudflare R2 from one place. Register a connection, pick a schedule and a retention policy, and Cellar handles the rest: scheduled dumps, automatic cleanup of expired backups, one-click restore, and alerts when something breaks.
 
@@ -35,9 +35,9 @@ Cellar moves backup into a single control plane:
 - **Streaming dumps** - `pg_dump -Fc` is streamed straight to R2 via multipart upload, no full buffering on disk or in memory
 - **Automatic version matching** - picks a `pg_dump` client that matches your server's major version (PostgreSQL 13 to 18)
 - **GFS retention** - keep last N, plus daily, weekly, and monthly tiers, with optional max age
-- **Automatic cleanup** - expired backups are deleted from R2 automatically
+- **Automatic cleanup** - expired backups are deleted from R2 automatically (retention starts in dry-run mode, see [Retention](#retention-gfs))
 - **Safety guard** - the most recent successful backup of a database is never deleted
-- **Restore** - restore any backup into any registered database, with typed-name confirmation
+- **Restore** - restore a backup into a registered database that has a restore connection URL, with typed-name confirmation
 - **Download** - short-lived presigned links (15 minutes max)
 - **Alerts** - LINE and Discord notifications on failure, repeated failures, or "no successful backup in X hours"
 - **Encrypted secrets** - connection URLs and tokens are encrypted at rest (AES-256-GCM) and never shown again after saving
@@ -72,7 +72,7 @@ flowchart LR
 
 ### How a backup runs
 
-1. Every 5 minutes, the Cron Trigger finds databases that are due and enqueues jobs.
+1. Every minute, the Cron Trigger finds databases that are due and enqueues jobs.
 2. The Queue consumer starts a Container job (one running job per database at a time).
 3. The container connects to Postgres through the Tunnel, detects the server version, and streams `pg_dump -Fc` to R2 while computing a sha256 checksum.
 4. The container reports the result (size, checksum, duration, errors) to the Worker via a signed callback.
@@ -90,7 +90,7 @@ Backups use the PostgreSQL custom format (`-Fc`), which is compressed and restor
 
 - A Cloudflare account with access to Workers, D1, R2, Queues, and Containers (Containers require a Workers Paid plan)
 - Cloudflare Zero Trust (the free tier is enough for small teams)
-- [Bun](https://bun.sh) and [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
+- [Bun](https://bun.sh) (`bun install` also installs [Wrangler](https://developers.cloudflare.com/workers/wrangler/))
 - Docker (to build the container image locally)
 - PostgreSQL 13 or newer on your VMs
 
@@ -99,7 +99,7 @@ Backups use the PostgreSQL custom format (`-Fc`), which is compressed and restor
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-org>/cellar.git
+git clone https://github.com/theerakarnm/cellar.git
 cd cellar
 bun install
 ```
@@ -107,9 +107,10 @@ bun install
 ### 2. Create Cloudflare resources
 
 ```bash
-wrangler d1 create cellar-db
-wrangler r2 bucket create cellar-backups
-wrangler queues create cellar-jobs
+bunx wrangler login
+bunx wrangler d1 create cellar
+bunx wrangler r2 bucket create cellar-backups
+bunx wrangler queues create cellar-jobs
 ```
 
 Copy the generated IDs into `wrangler.jsonc`.
@@ -120,17 +121,55 @@ Copy the generated IDs into `wrangler.jsonc`.
 bun run db:migrate:remote
 ```
 
-### 4. Set secrets
+### 4. Create the R2 API token and set configuration
+
+Cellar's container writes backups to R2 with an S3 API token.
+Give it as little access as possible:
+
+1. In the Cloudflare dashboard, go to **R2 > Manage API tokens** and create an API token.
+2. Set the permission to **Object Read and Write**.
+3. Limit the token to the bucket `cellar-backups` only.
+   Never use an account-wide token.
+4. Copy the **Access Key ID** and the **Secret Access Key**.
+   The secret is shown only once.
+
+Cellar hands this token to each job at run time.
+It is never put in the image, in queue messages, or in logs.
+See the [R2 token docs](https://developers.cloudflare.com/r2/api/tokens/).
+
+Set the secrets:
 
 ```bash
-wrangler secret put ENCRYPTION_KEY          # 32-byte base64 key, see below
-wrangler secret put ACCESS_TEAM_DOMAIN      # e.g. yourteam.cloudflareaccess.com
-wrangler secret put ACCESS_AUD              # Access application AUD tag
-wrangler secret put CALLBACK_HMAC_SECRET    # random string for container callbacks
-wrangler secret put R2_ACCOUNT_ID
-wrangler secret put R2_ACCESS_KEY_ID        # R2 API token scoped to the backup bucket
-wrangler secret put R2_SECRET_ACCESS_KEY
+bunx wrangler secret put ENCRYPTION_KEY          # 32-byte base64 key, see below
+bunx wrangler secret put ACCESS_TEAM_DOMAIN      # e.g. yourteam.cloudflareaccess.com
+bunx wrangler secret put ACCESS_AUD              # Access application AUD tag
+bunx wrangler secret put R2_ACCESS_KEY_ID        # from the R2 token
+bunx wrangler secret put R2_SECRET_ACCESS_KEY    # from the R2 token
 ```
+
+Set the plain values in the `vars` block of `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "R2_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com",
+  "R2_BUCKET": "cellar-backups",
+  "APP_BASE_URL": "https://cellar.example.com"
+}
+```
+
+| Name | Kind | Meaning |
+|---|---|---|
+| `ENCRYPTION_KEY` | secret | Base64 of 32 random bytes. Encrypts stored credentials. |
+| `ACCESS_TEAM_DOMAIN` | secret | Your Access team domain, hostname only. |
+| `ACCESS_AUD` | secret | Audience (AUD) tag of the Cellar Access application. |
+| `R2_ACCESS_KEY_ID` | secret | Access Key ID of the bucket-scoped R2 token. |
+| `R2_SECRET_ACCESS_KEY` | secret | Secret Access Key of the same token. |
+| `R2_ENDPOINT` | var | S3 endpoint of your R2 account. |
+| `R2_BUCKET` | var | Name of the backup bucket. |
+| `APP_BASE_URL` | var | Public URL of Cellar. Used for links in alerts. |
+| `R2_REGION` | optional var | SigV4 region for download links. Leave it empty for R2 (it uses `auto`). |
+| `CALLBACK_BASE_URL` | optional var | Public Worker URL for container callbacks. Leave it empty (see Access setup). |
+| `DEV_BYPASS` | local only | `true` skips Access for requests to `localhost`. Never set it in production. |
 
 Generate an encryption key:
 
@@ -155,7 +194,16 @@ bun run deploy
 3. Add a policy (for example, allow emails ending in `@yourcompany.com`).
 4. Copy the **Application Audience (AUD) tag** into the `ACCESS_AUD` secret.
 
-Cellar verifies the Access JWT on every request. Requests without a valid token are rejected with `401`.
+Cellar verifies the Access JWT on every `/api` request, except `GET /api/health`, which returns only `{ "ok", "version" }` (nothing about targets or config).
+Requests without a valid token are rejected with `401`.
+
+The container reports job results to the Worker through an outbound handler inside Cloudflare, not over the public internet.
+The route `/internal/jobs/callback` is outside `/api`, is not covered by the Access check, and accepts only requests with a valid HMAC signature.
+You do not need an Access bypass for it.
+
+> **To verify at first deploy.** The outbound handler path has not been verified on Cloudflare yet.
+> Run one backup and one connection test on your first deploy.
+> If the callback never arrives, set `CALLBACK_BASE_URL` to the public Worker URL and add an Access bypass for the exact path `/internal/jobs/callback` only.
 
 ## Connecting a database (per VM)
 
