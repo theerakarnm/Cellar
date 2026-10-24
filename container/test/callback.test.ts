@@ -89,10 +89,13 @@ describe("CallbackClient", () => {
     // Count attempts client-side: a request aborted before the server finished reading
     // its headers never reaches the handler, so the server cannot be the counter.
     let attempts = 0;
-    const countingFetch: typeof fetch = (input, init) => {
-      attempts += 1;
-      return fetch(input, init);
-    };
+    const countingFetch: typeof fetch = Object.assign(
+      (input: string | Request | URL, init?: RequestInit) => {
+        attempts += 1;
+        return fetch(input, init);
+      },
+      { preconnect: fetch.preconnect },
+    );
     // Aborted requests leave half-open sockets the plain close() waits on, so track and destroy them.
     const sockets = new Set<import("node:net").Socket>();
     const hung = createServer(() => {
