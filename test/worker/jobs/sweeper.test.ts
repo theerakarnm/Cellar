@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { runCronTick } from "../../../src/worker/jobs/cron";
 import { sweepStaleJobs } from "../../../src/worker/jobs/sweeper";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { fakeQueue, insertBackup, insertTarget, insertTest, NOW } from "./fixtures";
 
 let env: Env;
@@ -18,10 +18,16 @@ const minutesAgo = (minutes: number) => new Date(NOW.getTime() - minutes * 60_00
 const backupStatus = async (id: string) => (await getDb(env).select().from(backups).where(eq(backups.id, id)))[0];
 const testStatus = async (id: string) => (await getDb(env).select().from(connectionTests).where(eq(connectionTests.id, id)))[0];
 
-beforeEach(async () => {
+beforeAll(async () => {
   const created = await createTestEnv({ JOBS: fakeQueue().queue });
   env = created.env;
   dispose = created.dispose;
+});
+afterAll(() => dispose());
+beforeEach(async () => {
+  // resetDb does not cover connection_tests; clear them first or the FK on targets fails.
+  await env.DB.prepare("DELETE FROM connection_tests").run();
+  await resetDb(env);
   stopped = [];
   await insertTarget(env, "t1", { jobDeadlineMinutes: 120, nextRunAt: null });
   await insertTarget(env, "t2", { nextRunAt: null });
@@ -29,7 +35,6 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 describe("sweepStaleJobs", () => {
