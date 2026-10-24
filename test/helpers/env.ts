@@ -10,6 +10,7 @@ const TABLES_CHILD_FIRST = [
   "target_alert_channels",
   "restores",
   "backups",
+  "connection_tests",
   "targets",
   "alert_channels",
   "audit_logs",

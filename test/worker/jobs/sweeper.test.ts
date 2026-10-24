@@ -25,8 +25,6 @@ beforeAll(async () => {
 });
 afterAll(() => dispose());
 beforeEach(async () => {
-  // resetDb does not cover connection_tests; clear them first or the FK on targets fails.
-  await env.DB.prepare("DELETE FROM connection_tests").run();
   await resetDb(env);
   stopped = [];
   await insertTarget(env, "t1", { jobDeadlineMinutes: 120, nextRunAt: null });
