@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
@@ -6,7 +6,7 @@ import type { Env } from "../../../src/worker/env";
 import { handleCallback, verifyCallbackSignature } from "../../../src/worker/jobs/callback";
 import { app } from "../../../src/worker/app";
 import { SIGNATURE_VECTOR } from "../../../container/contract";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedChannel } from "../../helpers/alerts-seed";
 import { createExecutionContext } from "../../helpers/exec-ctx";
 import { insertBackup, insertTarget, insertTest, NOW, signedHeaders } from "./fixtures";
@@ -14,16 +14,21 @@ import { insertBackup, insertTarget, insertTest, NOW, signedHeaders } from "./fi
 let env: Env;
 let dispose: () => Promise<void>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   const created = await createTestEnv();
   env = created.env;
   dispose = created.dispose;
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
   await insertTarget(env, "t1");
   await insertBackup(env, "b1", "t1", { status: "running", startedAt: NOW.toISOString(), heartbeatAt: NOW.toISOString() });
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 const SHA = "a".repeat(64);

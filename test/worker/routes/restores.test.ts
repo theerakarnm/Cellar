@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedRestore, seedTarget } from "../../helpers/restore-fixtures";
 
 let ctx: Awaited<ReturnType<typeof createTestEnv>>;
@@ -8,14 +8,17 @@ let backupId: string;
 let destinationA: string;
 let destinationB: string;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ctx = await createTestEnv();
+});
+afterAll(async () => {
+  await ctx.dispose();
+});
+beforeEach(async () => {
+  await resetDb(ctx.env);
   backupId = (await seedBackup(ctx.env, (await seedTarget(ctx.env)).id)).id;
   destinationA = (await seedTarget(ctx.env)).id;
   destinationB = (await seedTarget(ctx.env)).id;
-});
-afterEach(async () => {
-  await ctx.dispose();
 });
 
 const get = (path: string) => app.request(`http://localhost${path}`, {}, ctx.env);

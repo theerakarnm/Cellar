@@ -1,16 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { app } from "../../../src/worker/app";
 import { getDb } from "../../../src/worker/db/client";
 import { settings } from "../../../src/worker/db/schema";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 
 let ctx: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   ctx = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await ctx.dispose();
+});
+beforeEach(async () => {
+  await resetDb(ctx.env);
 });
 
 const put = (body: unknown) =>

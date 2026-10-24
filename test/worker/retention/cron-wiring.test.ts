@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The default export pulls in the container entrypoints, which only exist in the Workers runtime.
 vi.mock("cloudflare:workers", () => ({
@@ -8,16 +8,19 @@ vi.mock("cloudflare:workers", () => ({
 
 import worker from "../../../src/worker/index";
 import { writeSetting } from "../../../src/worker/retention/config";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { createExecutionContext } from "../../helpers/exec-ctx";
 import { NOW, backupRow, daysAgo, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 describe("scheduled handler", () => {

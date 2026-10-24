@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
 import { writeSetting } from "../../../src/worker/retention/config";
 import { deleteBackup } from "../../../src/worker/retention/delete-backup";
 import { runRetention } from "../../../src/worker/retention/runner";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedRestore } from "../../helpers/restore-fixtures";
 import {
   NOW,
@@ -17,11 +17,14 @@ import {
 } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 const asDeletable = (targetId: string, b: { id: string; r2Key: string }) => ({ id: b.id, targetId, r2Key: b.r2Key });

@@ -1,25 +1,28 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../src/worker/db/client";
 import { restores } from "../../../src/worker/db/schema";
 import { handleCallback } from "../../../src/worker/jobs/callback";
 import { handleRestoreCallback, type CallbackBody } from "../../../src/worker/jobs/restore-callback";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedRestore, seedTarget } from "../../helpers/restore-fixtures";
 import { signedHeaders } from "./fixtures";
 
 let ctx: Awaited<ReturnType<typeof createTestEnv>>;
 let restoreId: string;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ctx = await createTestEnv();
+});
+afterAll(async () => {
+  await ctx.dispose();
+});
+beforeEach(async () => {
+  await resetDb(ctx.env);
   const source = await seedTarget(ctx.env);
   const destination = await seedTarget(ctx.env);
   const backup = await seedBackup(ctx.env, source.id);
   restoreId = (await seedRestore(ctx.env, { sourceBackupId: backup.id, destinationTargetId: destination.id })).id;
-});
-afterEach(async () => {
-  await ctx.dispose();
 });
 
 const T1 = new Date("2026-10-24T03:00:00.000Z");

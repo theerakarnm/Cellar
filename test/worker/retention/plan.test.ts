@@ -1,17 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../../../src/worker/db/client";
 import { backups, targets } from "../../../src/worker/db/schema";
 import { eq } from "drizzle-orm";
 import { loadActiveTarget, planRetention, toIsoUtc } from "../../../src/worker/retention/plan";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { NOW, daysAgo, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 async function plan(targetId: string) {

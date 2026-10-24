@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { enqueueDueBackups, queueConnectionTest, queueManualBackup, scheduleSlot } from "../../../src/worker/jobs/dispatch";
 import type { JobMessage } from "../../../src/worker/jobs/types";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedChannel } from "../../helpers/alerts-seed";
 import { DUE_SLOT, fakeQueue, insertBackup, insertTarget, NOW } from "./fixtures";
 
@@ -13,16 +13,22 @@ let env: Env;
 let sent: ReturnType<typeof fakeQueue>["sent"];
 let dispose: () => Promise<void>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   const fake = fakeQueue();
   sent = fake.sent;
   const created = await createTestEnv({ JOBS: fake.queue });
   env = created.env;
   dispose = created.dispose;
 });
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  sent.length = 0;
+  await resetDb(env);
+});
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 const allBackups = () => getDb(env).select().from(backups);

@@ -1,22 +1,27 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { deliverAlert, sendToChannel } from "../../../src/worker/alerts/dispatch";
 import type { Env } from "../../../src/worker/env";
 import { encrypt } from "../../../src/worker/lib/crypto";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedChannel, seedTarget, WEBHOOK } from "../../helpers/alerts-seed";
 
 let env: Env;
 let dispose: () => Promise<void>;
 let fetchSpy: MockInstance<typeof fetch>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ({ env, dispose } = await createTestEnv());
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
   await seedTarget(env, "t1");
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 describe("deliverAlert", () => {

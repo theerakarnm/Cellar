@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeSetting } from "../../../src/worker/retention/config";
 import { runRetention } from "../../../src/worker/retention/runner";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedRestore } from "../../helpers/restore-fixtures";
 import {
   NOW,
@@ -15,12 +15,17 @@ import {
 } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
+});
+afterAll(async () => {
+  await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await t.dispose();
 });
 
 const goLive = () => writeSetting(t.env, "retention_dry_run", false);

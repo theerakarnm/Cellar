@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, restores } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { handleJobMessage, type QueueMessageLike } from "../../../src/worker/jobs/consumer";
 import type { JobPayload } from "../../../src/worker/jobs/payload";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedRestore } from "../../helpers/restore-fixtures";
 import { insertBackup, insertTarget, insertTest, NOW } from "./fixtures";
 
@@ -13,15 +13,20 @@ let env: Env;
 let dispose: () => Promise<void>;
 let started: JobPayload[];
 
-beforeEach(async () => {
+beforeAll(async () => {
   const created = await createTestEnv();
   env = created.env;
   dispose = created.dispose;
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
   started = [];
+  await resetDb(env);
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 function message(body: unknown) {

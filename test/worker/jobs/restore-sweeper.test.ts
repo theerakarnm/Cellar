@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../src/worker/db/client";
 import { restores } from "../../../src/worker/db/schema";
 import * as runner from "../../../src/worker/jobs/runner-client";
 import { sweepRestores } from "../../../src/worker/jobs/restore-sweeper";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedRestore, seedTarget } from "../../helpers/restore-fixtures";
 
 vi.mock("../../../src/worker/jobs/runner-client", async (importOriginal) => ({
@@ -21,15 +21,18 @@ let ctx: Awaited<ReturnType<typeof createTestEnv>>;
 let sourceId: string;
 let backupId: string;
 
+beforeAll(async () => {
+  ctx = await createTestEnv();
+});
+afterAll(async () => {
+  await ctx.dispose();
+});
 beforeEach(async () => {
   stopJob.mockReset();
   stopJob.mockResolvedValue(undefined);
-  ctx = await createTestEnv();
+  await resetDb(ctx.env);
   sourceId = (await seedTarget(ctx.env)).id;
   backupId = (await seedBackup(ctx.env, sourceId)).id;
-});
-afterEach(async () => {
-  await ctx.dispose();
 });
 
 /** Each restore gets its own destination target: only one queued or running restore may exist per destination. */

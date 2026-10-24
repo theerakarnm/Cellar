@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   getLastRun,
   getRetentionDryRun,
@@ -6,14 +6,17 @@ import {
   setLastRun,
   writeSetting,
 } from "../../../src/worker/retention/config";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 describe("retention config", () => {

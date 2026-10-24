@@ -1,19 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLastRun, writeSetting } from "../../../src/worker/retention/config";
 import { runDailyRetention, triggerDailyRetention, triggerRetentionAfterBackup } from "../../../src/worker/retention/triggers";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { NOW, backupRow, daysAgo, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 // 19:00 on 15 June in Asia/Bangkok. The next Bangkok day starts at 17:00Z, still the same UTC day.
 const NEXT_BANGKOK_DAY = new Date("2026-06-15T17:01:00.000Z");
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
+});
+afterAll(async () => {
+  await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await t.dispose();
 });
 
 const goLive = () => writeSetting(t.env, "retention_dry_run", false);

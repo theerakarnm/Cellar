@@ -1,16 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "../../../src/worker/env";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedTarget } from "../../helpers/alerts-seed";
 
 let env: Env;
 let dispose: () => Promise<void>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ({ env, dispose } = await createTestEnv());
 });
-afterEach(async () => {
+afterAll(async () => {
   await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
 });
 
 describe("alert state columns on targets", () => {

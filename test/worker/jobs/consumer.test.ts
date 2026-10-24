@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
@@ -8,7 +8,7 @@ import { enqueueDueBackups, queueManualBackup } from "../../../src/worker/jobs/d
 import { rewriteForTunnel, type JobPayload } from "../../../src/worker/jobs/payload";
 import { jobShape, SAMPLE_JOBS } from "../../../container/contract";
 import { updateSettings } from "../../../src/worker/lib/settings";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { captureLogs, fakeQueue, insertBackup, insertTarget, insertTest, NOW, SECRETS } from "./fixtures";
 import { seedChannel } from "../../helpers/alerts-seed";
 
@@ -17,17 +17,23 @@ let sent: ReturnType<typeof fakeQueue>["sent"];
 let dispose: () => Promise<void>;
 let started: JobPayload[];
 
-beforeEach(async () => {
+beforeAll(async () => {
   const fake = fakeQueue();
   sent = fake.sent;
   const created = await createTestEnv({ JOBS: fake.queue });
   env = created.env;
   dispose = created.dispose;
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  sent.length = 0;
+  await resetDb(env);
   started = [];
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 function message(body: unknown) {

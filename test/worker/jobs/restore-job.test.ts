@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../src/worker/db/client";
 import { backups, restores } from "../../../src/worker/db/schema";
@@ -8,7 +8,7 @@ import { MAX_START_ATTEMPTS, runRestoreJob } from "../../../src/worker/jobs/rest
 import { handleRestoreCallback } from "../../../src/worker/jobs/restore-callback";
 import { sweepRestores } from "../../../src/worker/jobs/restore-sweeper";
 import * as runner from "../../../src/worker/jobs/runner-client";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedRestore, seedTarget, TEST_R2 } from "../../helpers/restore-fixtures";
 
 vi.mock("../../../src/worker/jobs/runner-client", async (importOriginal) => ({
@@ -23,15 +23,18 @@ const NOW = new Date("2026-10-24T03:00:00.000Z");
 let ctx: Awaited<ReturnType<typeof createTestEnv>>;
 let env: Env;
 
+beforeAll(async () => {
+  ctx = await createTestEnv(TEST_R2);
+  env = ctx.env;
+});
+afterAll(async () => {
+  await ctx.dispose();
+});
 beforeEach(async () => {
   startJob.mockReset();
   startJob.mockResolvedValue(undefined);
   vi.mocked(runner.stopJob).mockReset();
-  ctx = await createTestEnv(TEST_R2);
-  env = ctx.env;
-});
-afterEach(async () => {
-  await ctx.dispose();
+  await resetDb(ctx.env);
 });
 
 async function queuedRestore(targetOptions: Parameters<typeof seedTarget>[1] = {}) {

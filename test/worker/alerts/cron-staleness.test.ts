@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 // The default export pulls in the container entrypoints, which only exist in the Workers runtime.
 vi.mock("cloudflare:workers", () => ({
@@ -8,7 +8,7 @@ vi.mock("cloudflare:workers", () => ({
 
 import worker from "../../../src/worker/index";
 import type { Env } from "../../../src/worker/env";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { createExecutionContext } from "../../helpers/exec-ctx";
 import { seedChannel, seedTarget, targetRow } from "../../helpers/alerts-seed";
 
@@ -19,13 +19,18 @@ let env: Env;
 let dispose: () => Promise<void>;
 let fetchSpy: MockInstance<typeof fetch>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ({ env, dispose } = await createTestEnv());
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 async function tick(at: Date) {

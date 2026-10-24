@@ -1,15 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedRestore } from "../../helpers/restore-fixtures";
 import { auditRows, backupRow, daysAgo, failingR2, hasObject, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 const del = (id: string, body: unknown = { confirm: true }, env = t.env) =>

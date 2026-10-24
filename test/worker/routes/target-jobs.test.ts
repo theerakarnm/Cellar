@@ -1,26 +1,30 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { auditLogs, connectionTests } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { app } from "../../../src/worker/app";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { fakeQueue, insertBackup, insertTarget, insertTest, NOW } from "../jobs/fixtures";
 
 let env: Env;
 let sent: ReturnType<typeof fakeQueue>["sent"];
 let dispose: () => Promise<void>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   const fake = fakeQueue();
   sent = fake.sent;
   const created = await createTestEnv({ JOBS: fake.queue });
   env = created.env;
   dispose = created.dispose;
-  await insertTarget(env, "t1", { nextRunAt: null });
 });
-afterEach(async () => {
+afterAll(async () => {
   await dispose();
+});
+beforeEach(async () => {
+  sent.length = 0;
+  await resetDb(env);
+  await insertTarget(env, "t1", { nextRunAt: null });
 });
 
 const call = (path: string, init?: RequestInit) => app.request(`http://localhost/api/targets/${path}`, init, env);

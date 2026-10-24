@@ -1,19 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { auditLogs } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { app } from "../../../src/worker/app";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 
 let env: Env;
 let dispose: () => Promise<void>;
-beforeEach(async () => {
+beforeAll(async () => {
   const created = await createTestEnv();
   env = created.env;
   dispose = created.dispose;
 });
-afterEach(async () => {
+afterAll(async () => {
   await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
 });
 
 const put = (body: unknown) =>

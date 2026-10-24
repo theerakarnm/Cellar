@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { checkStaleness, staleAfterMs } from "../../../src/worker/alerts/staleness";
 import { notifyBackupFinished } from "../../../src/worker/alerts/notify";
 import type { Env } from "../../../src/worker/env";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedChannel, seedTarget, targetRow } from "../../helpers/alerts-seed";
 
 const HOUR = 3_600_000;
@@ -13,13 +13,18 @@ let env: Env;
 let dispose: () => Promise<void>;
 let fetchSpy: MockInstance<typeof fetch>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ({ env, dispose } = await createTestEnv());
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 const texts = () => fetchSpy.mock.calls.map((c: Parameters<typeof fetch>) => JSON.parse((c[1] as RequestInit).body as string).content as string);

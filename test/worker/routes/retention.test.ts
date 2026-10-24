@@ -1,16 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../../src/worker/app";
 import { writeSetting } from "../../../src/worker/retention/config";
 import { runRetention } from "../../../src/worker/retention/runner";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { NOW, auditRows, backupRow, daysAgo, hasObject, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 const preview = (targetId: string, env = t.env) =>

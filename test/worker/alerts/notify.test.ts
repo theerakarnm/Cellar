@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { afterResponse, notifyBackupFinished } from "../../../src/worker/alerts/notify";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { seedBackup, seedChannel, seedTarget, targetRow } from "../../helpers/alerts-seed";
 import type { Env } from "../../../src/worker/env";
 
@@ -10,15 +10,20 @@ let dispose: () => Promise<void>;
 let fetchSpy: MockInstance<typeof fetch>;
 let n = 0;
 
-beforeEach(async () => {
+beforeAll(async () => {
   ({ env, dispose } = await createTestEnv());
+});
+afterAll(async () => {
+  await dispose();
+});
+beforeEach(async () => {
+  await resetDb(env);
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
   await seedTarget(env, "t1", { name: "shop-prod", project_tag: "shop" });
   await seedChannel(env, "c1", "t1");
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  await dispose();
 });
 
 async function finish(status: string, over: Record<string, unknown> = {}) {

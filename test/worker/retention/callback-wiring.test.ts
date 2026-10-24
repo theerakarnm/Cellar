@@ -1,16 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { writeSetting } from "../../../src/worker/retention/config";
-import { createTestEnv } from "../../helpers/env";
+import { createTestEnv, resetDb } from "../../helpers/env";
 import { createExecutionContext } from "../../helpers/exec-ctx";
 import { backupRow, daysAgo, hasObject, seedBackup, seedTarget } from "../../helpers/retention-fixtures";
 import { postSucceededCallback, seedRunningBackup } from "./callback-helpers";
 
 let t: Awaited<ReturnType<typeof createTestEnv>>;
-beforeEach(async () => {
+beforeAll(async () => {
   t = await createTestEnv();
 });
-afterEach(async () => {
+afterAll(async () => {
   await t.dispose();
+});
+beforeEach(async () => {
+  await resetDb(t.env);
 });
 
 describe("succeeded backup callback", () => {
