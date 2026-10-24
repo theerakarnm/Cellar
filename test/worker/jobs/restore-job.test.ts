@@ -126,6 +126,14 @@ describe("runRestoreJob", () => {
     expect((await rowOf(restore.id))?.status).toBe("queued");
   });
 
+  it("still returns the restore to queued when stopping the half-started container also throws", async () => {
+    const { restore } = await queuedRestore();
+    startJob.mockRejectedValueOnce(new Error("no capacity"));
+    vi.mocked(runner.stopJob).mockRejectedValueOnce(new Error("container already gone"));
+    expect(await runRestoreJob(env, { jobId: restore.id, attempts: 1 }, NOW)).toBe("retry");
+    expect(await rowOf(restore.id)).toMatchObject({ status: "queued", startedAt: null, heartbeatAt: null });
+  });
+
   it("fails the restore with a redacted message on the last attempt", async () => {
     const { restore } = await queuedRestore();
     startJob.mockRejectedValue(new Error("boom postgres://restore_user:restore-pass-1@db.example.com/scratch"));

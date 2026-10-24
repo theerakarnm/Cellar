@@ -52,6 +52,42 @@ describe("handleRestoreCallback", () => {
     expect(await row()).toMatchObject({ status: "queued", startedAt: null, lastSeq: 0 });
   });
 
+  it("updates only the heartbeat on progress", async () => {
+    await getDb(ctx.env).update(restores).set({ status: "running" }).where(eq(restores.id, restoreId));
+    expect(await apply(event(1, "started"), T1)).toBe("applied");
+    expect(await apply(event(2, "progress"), T2)).toBe("applied");
+    expect(await row()).toMatchObject({ status: "running", startedAt: T1.toISOString(), heartbeatAt: T2.toISOString(), lastSeq: 2 });
+  });
+
+  it("ignores a replayed or out-of-order seq", async () => {
+    await getDb(ctx.env).update(restores).set({ status: "running" }).where(eq(restores.id, restoreId));
+    await apply(event(1, "started"), T1);
+    await apply(event(3, "progress"), T2);
+    expect(await apply(event(3, "progress"), T3)).toBe("ignored");
+    expect(await apply(event(2, "progress"), T3)).toBe("ignored");
+    expect(await row()).toMatchObject({ heartbeatAt: T2.toISOString(), lastSeq: 3 });
+  });
+
+  it("ignores progress for a restore that is not running", async () => {
+    expect(await apply(event(1, "progress"), T1)).toBe("ignored");
+    expect((await row())?.status).toBe("queued");
+  });
+
+  it("marks success once and never changes a terminal state afterwards", async () => {
+    await getDb(ctx.env).update(restores).set({ status: "running" }).where(eq(restores.id, restoreId));
+    await apply(event(1, "started"), T1);
+    expect(await apply(event(2, "succeeded"), T2)).toBe("applied");
+    expect(await row()).toMatchObject({ status: "success", finishedAt: T2.toISOString() });
+    expect(await apply(event(3, "failed", { code: "UNKNOWN", message: "late" }), T3)).toBe("ignored");
+    expect(await apply(event(4, "succeeded"), T3)).toBe("ignored");
+    expect(await row()).toMatchObject({ status: "success", finishedAt: T2.toISOString(), errorCode: null });
+  });
+
+  it("accepts a terminal event even when the started event was lost", async () => {
+    expect(await apply(event(2, "succeeded"), T2)).toBe("applied");
+    expect((await row())?.status).toBe("success");
+  });
+
   it("stores a failure with its error code and a redacted message", async () => {
     await apply(event(1, "started"), T1);
     const message = "pg_restore: connection to postgres://restore_user:restore-pass-1@127.0.0.1:15432/scratch failed";

@@ -91,7 +91,11 @@ export async function runRestoreJob(env: Env, message: { jobId: string; attempts
     await startJob(env, payload);
     return "started";
   } catch (error) {
-    await stopJob(env, restore.id);
+    try {
+      await stopJob(env, restore.id);
+    } catch (stopError) {
+      console.warn(`restore job: could not stop ${restore.id}: ${redactError(stopError)}`);
+    }
     if (message.attempts < MAX_START_ATTEMPTS) {
       await db
         .update(restores)
