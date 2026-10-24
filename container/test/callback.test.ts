@@ -86,11 +86,17 @@ describe("CallbackClient", () => {
   });
 
   it("aborts a hung request after timeoutMs: a terminal event resolves false after 5 attempts", async () => {
+    // Count attempts client-side: a request aborted before the server finished reading
+    // its headers never reaches the handler, so the server cannot be the counter.
     let attempts = 0;
+    const countingFetch: typeof fetch = (input, init) => {
+      attempts += 1;
+      return fetch(input, init);
+    };
     // Aborted requests leave half-open sockets the plain close() waits on, so track and destroy them.
     const sockets = new Set<import("node:net").Socket>();
     const hung = createServer(() => {
-      attempts += 1; // headers received, never answered
+      // headers received, never answered
     });
     hung.on("connection", (socket) => {
       sockets.add(socket);
@@ -100,9 +106,11 @@ describe("CallbackClient", () => {
     const hungUrl = `http://127.0.0.1:${(hung.address() as AddressInfo).port}/cb`;
     try {
       const started = Date.now();
-      const c = new CallbackClient({ url: hungUrl, jobId: "job-1", jobKeyBase64: jobKey, timeoutMs: 50, sleep: async () => {} });
+      const c = new CallbackClient({ url: hungUrl, jobId: "job-1", jobKeyBase64: jobKey, fetchFn: countingFetch, timeoutMs: 50, sleep: async () => {} });
       expect(await c.send("failed")).toBe(false);
       expect(attempts).toBe(5);
+      // 5 attempts x 50ms abort budget with a no-op sleep: proves the abort fired
+      // instead of the 15s default timeout (which would blow well past 4s).
       expect(Date.now() - started).toBeLessThan(4000);
     } finally {
       hung.close();
