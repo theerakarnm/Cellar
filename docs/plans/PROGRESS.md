@@ -170,3 +170,20 @@ bun run dev cannot start without Docker.
 AuditLog loadMore does not cancel when the filter changes mid-flight.
 Zone label GMT+0 is shown for UTC.
 Owner action: run bun run dev with Docker once to check the container path, and look at the screenshots in the browser for taste.
+
+## Phase 10 - Docs and open-source files
+Tasks done: 11 plan tasks plus 3 fix tasks (haiku and glm), and one flaky test fix.
+Files: README.md, SECURITY.md, CONTRIBUTING.md, docs/vm-onboarding.md, docs/restore-runbook.md, docs/alerts.md, .github/workflows/ci.yml, scripts/check-readme.ts (checks docs against package.json, wrangler.jsonc, .dev.vars.example, routes and env vars in CI), .dockerignore.
+Sonnet review rounds: 1 (no blockers, 8 minors fixed).
+Opus verdict: round 1 FAIL (2 blockers), round 2 PASS.
+Blockers fixed: the documented no-Docker dev command failed on a fresh clone because dist/ui did not exist (docs now run bun run build:ui first, verified literally).
+wrangler.jsonc image_build_context was ./container but the Dockerfile copies from the repo root, so image builds would have failed: it is now . (verified with a real podman build).
+Other fixes: retention example ranges, 950 GiB database size cap wording, PG13 test connection note, max_concurrent_jobs versus max_instances note, .gitignore for .dev.vars.* and .env* (keeps .dev.vars.example), scripts/ in tsconfig, repo-root .dockerignore so test and e2e files stay out of the image, presigned URL warning in the restore runbook.
+Verified: README retention example against the real selectBackupsToDelete over 730 dates, CI action SHAs (real 40 hex commit SHAs), check-readme.ts negative control, no account id, email or token in the tree or git history of this session.
+No wrangler deploy or remote command was run at any point.
+Deviations: the CI workflow, the first deploy, bun run dev with Docker, the real tunnel path, the container callback outbound path, and real LINE and Discord delivery are documented as to verify at first deploy.
+Deferred MINOR items: bun types in the root tsconfig let Bun globals type-check in Worker code (a separate scripts tsconfig would need a package.json change).
+Bun version pin in docs.
+Workers.dev Access wording in setup step 7.
+Cross-version restore line.
+Owner actions: enable GitHub private vulnerability reporting (SECURITY.md relies on it).
