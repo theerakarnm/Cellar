@@ -2,20 +2,24 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { JobError } from "../job";
-import { MAX_PG_MAJOR, pgBinary, pgEnv } from "../pg";
+import { assertSupportedMajor, pgBinary, pgEnv } from "../pg";
 import { childEnv, startChild } from "../process";
 import { S3Error } from "../s3";
-import { connectionFor, s3For, toolFailure, type JobContext } from "./context";
+import { connectionFor, probeServer, s3For, toolFailure, type JobContext } from "./context";
 
 /**
- * Streams the dump from R2 into pg_restore. The newest pg_restore is used because it reads every
- * older archive format. The destination is the database named in the job's connection URL.
+ * Streams the dump from R2 into the pg_restore matching the destination server's major. A newer
+ * pg_restore sends SQL (for example transaction_timeout) that older servers reject. The destination
+ * is the database named in the job's connection URL.
  */
 export async function runRestore(ctx: JobContext): Promise<Record<string, unknown>> {
   const { job, signal } = ctx;
   if (!job.restore) throw new JobError("INVALID_JOB", "Invalid job: restore is required");
   const startedAt = Date.now();
   const connection = connectionFor(job);
+
+  const probe = await probeServer(ctx, connection);
+  assertSupportedMajor(probe.major, "RESTORE_FAILED");
 
   let object: Response;
   try {
@@ -26,7 +30,7 @@ export async function runRestore(ctx: JobContext): Promise<Record<string, unknow
   if (!object.body) throw new JobError("DOWNLOAD_FAILED", "The backup object has no body");
 
   const restore = startChild(
-    pgBinary(MAX_PG_MAJOR, "pg_restore"),
+    pgBinary(probe.major, "pg_restore"),
     ["--clean", "--if-exists", "--no-owner", "--no-password", "--dbname", connection.database],
     { env: childEnv(pgEnv(connection)), signal },
   );

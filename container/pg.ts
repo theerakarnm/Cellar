@@ -1,4 +1,4 @@
-import { JobError } from "./job";
+import { JobError, type ErrorCode } from "./job";
 
 export const PG_BIN_ROOT = "/usr/lib/postgresql";
 export const MIN_PG_MAJOR = 13;
@@ -94,9 +94,9 @@ export function parseProbe(output: string): ServerProbe {
   };
 }
 
-export function assertSupportedMajor(major: number): void {
+export function assertSupportedMajor(major: number, code: ErrorCode = "DUMP_FAILED"): void {
   if (major < MIN_PG_MAJOR || major > MAX_PG_MAJOR) {
-    throw new JobError("DUMP_FAILED", `PostgreSQL ${major} is not supported (supported: ${MIN_PG_MAJOR}-${MAX_PG_MAJOR})`);
+    throw new JobError(code, `PostgreSQL ${major} is not supported (supported: ${MIN_PG_MAJOR}-${MAX_PG_MAJOR})`);
   }
 }
 
