@@ -62,7 +62,7 @@ cellar/
     routes/  targets.ts  backups.ts  restores.ts  alerts.ts  settings.ts  audit-logs.ts  internal.ts
     db/  schema.ts  client.ts
     lib/  crypto.ts  redact.ts  r2-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  s3-presign.ts
-    retention/  gfs.ts  runner.ts
+    retention/  types.ts  gfs.ts  runner.ts
     jobs/  dispatch.ts  consumer.ts  callback.ts  sweeper.ts
     alerts/  line.ts  discord.ts  staleness.ts
     container/  job-runner.ts  (Container class)
