@@ -32,12 +32,15 @@ afterEach(async () => {
 function message(body: unknown) {
   return { body, ack: vi.fn<QueueMessageLike["ack"]>(), retry: vi.fn<QueueMessageLike["retry"]>() };
 }
-const deps = (failWith?: Error) => ({
+const deps = (failWith?: Error, stopWith?: Error) => ({
   now: () => NOW,
   startJob: async (payload: JobPayload) => {
     if (failWith) throw failWith;
     started.push(payload);
   },
+  stopJob: vi.fn(async (_jobId: string) => {
+    if (stopWith) throw stopWith;
+  }),
 });
 const backupRow = async (id: string) => (await getDb(env).select().from(backups).where(eq(backups.id, id)))[0];
 const testRow = async (id: string) => (await getDb(env).select().from(connectionTests).where(eq(connectionTests.id, id)))[0];
@@ -136,6 +139,31 @@ describe("handleJobMessage - backup", () => {
     expect(await backupRow("b1")).toMatchObject({ status: "failed", errorCode: "START_FAILED" });
     expect((await getDb(env).select().from(targets).where(eq(targets.id, "t1")))[0]?.lastStatus).toBe("failed");
     expect(msg.ack).toHaveBeenCalledOnce();
+  });
+
+  it("stops the container before marking START_FAILED when start fails after the runner may have started", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await insertTarget(env, "t1");
+    await insertBackup(env, "b1", "t1");
+    const d = deps(new Error("outbound failed"));
+    const msg = backupMessage("b1");
+    await handleJobMessage(env, msg, d);
+    expect(d.stopJob).toHaveBeenCalledWith("b1");
+    expect(await backupRow("b1")).toMatchObject({ status: "failed", errorCode: "START_FAILED" });
+    expect(msg.ack).toHaveBeenCalledOnce();
+  });
+
+  it("still marks START_FAILED and acks when stopping the container also fails, logging only the redacted error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await insertTarget(env, "t1");
+    await insertBackup(env, "b1", "t1");
+    const msg = backupMessage("b1");
+    await handleJobMessage(env, msg, deps(new Error("no capacity"), new Error(`stop failed at postgres://app:${SECRETS.password}@db`)));
+    expect(await backupRow("b1")).toMatchObject({ status: "failed", errorCode: "START_FAILED" });
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(warn.mock.calls.flat().join(" ")).toContain("could not stop backup b1");
+    expect(warn.mock.calls.flat().join(" ")).not.toContain(SECRETS.password);
   });
 
   it("marks the job failed when a tunnel secret cannot be decrypted", async () => {

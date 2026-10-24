@@ -5,11 +5,13 @@ import type { Env } from "../env";
 import { getSettings } from "../lib/settings";
 import { buildJobPayload, type JobPayload } from "./payload";
 import { buildBackupKey } from "../lib/r2-key";
+import { redactError } from "../lib/redact";
 import { claimJob, failJob, readJobStatus } from "./state";
 import { jobMessageSchema, QUEUE_RETRY_DELAY_SECONDS } from "./types";
 
 export interface ConsumerDeps {
   startJob(payload: JobPayload): Promise<void>;
+  stopJob(jobId: string): Promise<void>;
   now(): Date;
 }
 
@@ -66,6 +68,11 @@ export async function handleJobMessage(env: Env, message: QueueMessageLike, deps
     await deps.startJob(payload);
   } catch (error) {
     console.error(`jobs: could not start ${type} ${jobId}`, error instanceof Error ? error.name : "unknown");
+    try {
+      await deps.stopJob(jobId);
+    } catch (stopError) {
+      console.warn(`jobs: could not stop ${type} ${jobId}: ${redactError(stopError)}`);
+    }
     await failJob(env, type, jobId, { code: "START_FAILED", message: "The container could not be started" }, deps.now().toISOString());
   }
   message.ack();
