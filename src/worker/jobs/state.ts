@@ -16,8 +16,9 @@ export interface ClaimOptions {
 
 /**
  * Atomically moves one `queued` job to `running`. Returns false when the row is not `queued`, when the
- * number of running backups is at the limit (tests and restores are not counted), or when the other job
- * type is running for the same target. One SQL statement, so two consumers cannot both pass the checks.
+ * number of running backups is at the limit (tests and restores are not counted), when the other job
+ * type is running for the same target, or when a restore into the backup's target is queued or running.
+ * One SQL statement, so two consumers cannot both pass the checks.
  */
 export async function claimJob(env: Env, options: ClaimOptions): Promise<boolean> {
   const { jobId, type, nowIso, r2Key, maxConcurrent } = options;
@@ -28,6 +29,7 @@ export async function claimJob(env: Env, options: ClaimOptions): Promise<boolean
           `UPDATE backups SET status = 'running', started_at = ?, heartbeat_at = ?, attempt = attempt + 1, r2_key = ?
            WHERE id = ? AND status = 'queued'
            AND NOT EXISTS (SELECT 1 FROM connection_tests t WHERE t.target_id = backups.target_id AND t.status = 'running')
+           AND NOT EXISTS (SELECT 1 FROM restores r WHERE r.destination_target_id = backups.target_id AND r.status IN ('queued', 'running'))
            AND ${runningBackups} < ?`,
         ).bind(nowIso, nowIso, r2Key ?? null, jobId, maxConcurrent)
       : env.DB.prepare(
