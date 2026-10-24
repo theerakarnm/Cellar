@@ -59,9 +59,9 @@ cellar/
     app.ts                     Hono app: routes and middleware wiring
     env.ts                     Env type
     middleware/  access.ts  error.ts
-    routes/  targets.ts  backups.ts  restores.ts  alerts.ts  settings.ts  audit.ts  internal.ts
+    routes/  targets.ts  backups.ts  restores.ts  alerts.ts  settings.ts  audit-logs.ts  internal.ts
     db/  schema.ts  client.ts
-    lib/  crypto.ts  redact.ts  r2-key.ts  uuidv7.ts  audit.ts  validate.ts  s3-presign.ts
+    lib/  crypto.ts  redact.ts  r2-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  s3-presign.ts
     retention/  gfs.ts  runner.ts
     jobs/  dispatch.ts  consumer.ts  callback.ts  sweeper.ts
     alerts/  line.ts  discord.ts  staleness.ts
@@ -75,6 +75,9 @@ cellar/
 
 Notes:
 - The container entrypoint is TypeScript and runs on Bun.
+- `src/shared/` (`tz.ts`, `cron.ts`, `pg-url.ts`, `target-schema.ts`) holds code used by both the Worker and the UI, with tests in `test/shared/`. `src/worker/services/` holds the D1 logic that routes call. `test/helpers/` holds the shared D1/R2/Queue test harness (`getPlatformProxy`).
+- Audit rows are written by `src/worker/lib/audit.ts` (a helper, not middleware). Services commit the audit insert in the same `db.batch` as the change.
+- Cron grammar is numeric 5-field (no names, no @macros). A wall time inside a DST gap runs just after the gap; a wall time that happens twice runs once.
 - `container/hmac.ts` is the single HMAC implementation (WebCrypto only). The Worker imports it by relative path.
 - `DEV_BYPASS` is honoured only when its value is exactly `"true"` and the request host is `localhost`, `127.0.0.1`, or `[::1]`.
 - Cron and timezone code is in-house in `src/shared/` (no dependency). Retention imports `getZonedParts` from `src/shared/tz.ts`.
@@ -91,7 +94,7 @@ Encrypted columns store `v1:<base64 iv>:<base64 ciphertext+tag>`. `ENCRYPTION_KE
 | id | text PK | |
 | name | text NOT NULL | unique among non-deleted targets (a deleted target's name can be reused) |
 | project_tag | text | optional label |
-| db_name | text NOT NULL | used in R2 key; sanitized `[A-Za-z0-9_-]` |
+| db_name | text NOT NULL | derived from the connection URL path (not a request field); used in R2 key; sanitized `[A-Za-z0-9_-]` |
 | pg_version | integer | optional hint (13-18); detected on test |
 | connection_url_enc | text NOT NULL | backup role URL, host = tunnel hostname |
 | restore_url_enc | text | optional restore-capable URL |
@@ -206,17 +209,17 @@ Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 
 ## 4. API routes
 
 All routes sit under `/api`, require a valid Access JWT (except `GET /api/health`), and validate input with Zod.
-Errors: `{ "error": { "code": string, "message": string } }` with redacted messages.
+Errors: `{ "error": { "code": string, "message": string, "details"?: unknown } }` with redacted messages. Codes: `validation_error` (400, `details` is `{ path, message }[]`), `unauthorized` (401), `not_found` (404), `conflict` (409), `internal_error` (500).
 Lists use `?limit&cursor` and return `{ items, nextCursor }`.
-Secrets are write-only: responses show `has_connection_url: true`, never the value.
+Secrets are write-only: responses show `connection: { host, port, dbName, user }`, `hasRestoreUrl`, and `hasTunnelToken`, never a URL, token, or `*_enc` value.
 
 | Method + path | Request | Response |
 |---|---|---|
 | GET /api/me | - | `{ email }` |
-| GET /api/targets | - | `{ items: Target[] }` |
-| POST /api/targets | `{ name, projectTag?, connectionUrl, restoreUrl?, tunnel:{hostname,tokenId,tokenSecret}, scheduleCron?, timezone?, retention?:{keepLast?,daily?,weekly?,monthly?,maxAgeDays?}, jobDeadlineMinutes?, staleAfterHours?, alertFailureThreshold?, alertChannelIds?, enabled? }` (omitted fields take the defaults in section 3; `db_name` is derived from the connection URL) | `201 Target` |
-| GET /api/targets/:id | - | `Target` (+ latest backup) |
-| PATCH /api/targets/:id | partial of POST body; omitted secret fields keep their stored values; `alertChannelIds` replaces the set when present | `Target` |
+| GET /api/targets | `?limit&cursor` | `{ items: Target[], nextCursor }`, sorted by name |
+| POST /api/targets | `{ name, projectTag?, connectionUrl, restoreUrl?, tunnel:{hostname,tokenId,tokenSecret}, scheduleCron?, timezone?, retention?:{keepLast?,daily?,weekly?,monthly?,maxAgeDays?}, jobDeadlineMinutes?, staleAfterHours?, alertFailureThreshold?, alertChannelIds?, enabled? }` (unknown keys are rejected; `alertFailureThreshold` is 1 to 100, default 3; omitted fields take the defaults in section 3; `db_name` is derived from the connection URL) | `201 Target` |
+| GET /api/targets/:id | - | `Target` |
+| PATCH /api/targets/:id | partial of POST body; omitted secret fields keep their stored values; each supplied `tunnel` part replaces only that part; `restoreUrl: null` and `projectTag: null` clear; `retention` merges per field; `alertChannelIds` replaces the set when present | `Target` |
 | DELETE /api/targets/:id | - | `204`, soft delete: stops the schedule, keeps R2 data and history. No purge action in v1. |
 | POST /api/targets/:id/test | - | `202 { testId }`. Runs a `test` container job. Poll `GET /api/targets/:id/test/:testId` for `{ status, result?, error? }`. Works on saved targets only. The UI saves a new target with `enabled = false`, then tests, then the user enables it. |
 | POST /api/targets/:id/backup | - | `202 { backupId }` ("Backup now") |
@@ -234,7 +237,7 @@ Secrets are write-only: responses show `has_connection_url: true`, never the val
 | GET /api/health | - | `{ ok, version }` (unauthenticated; nothing about targets or config; every other `/api` route requires Access) |
 | POST /internal/jobs/callback | signed payload (jobId in body), see section 5 | `200`. Reached via the container outbound handler if the spike confirms it, otherwise via the public URL with an Access bypass for this exact path only. |
 
-`Target` fields mirror the schema minus `*_enc`. Connection info is `connection: { host, port, dbName, user }` plus booleans `hasRestoreUrl` and `hasTunnelToken`. The response also has `stats: { backupCount, totalBackupBytes }`, counting only non-deleted success backups, and `alertChannelIds`.
+`Target` fields: id, name, projectTag, dbName, connection (`{ host, port, dbName, user }`), hasRestoreUrl, hasTunnelToken, tunnelHostname, scheduleCron, timezone, enabled, retention, jobDeadlineMinutes, staleAfterHours, alertFailureThreshold, nextRunAt, lastBackupAt, lastStatus, alertChannelIds, stats (`{ backupCount, totalBackupBytes }`, counting only non-deleted success backups), createdAt, updatedAt.
 
 ## 5. Container job contract
 
