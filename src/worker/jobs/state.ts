@@ -49,13 +49,17 @@ export async function readJobStatus(env: Env, type: JobType, jobId: string): Pro
   return row?.status ?? null;
 }
 
-/** Moves a `queued` or `running` job to `failed`. Terminal rows are left alone. Returns true when a row changed. */
+/** The statuses a job row can be failed from. Terminal rows never change. */
+export type FailableStatus = "queued" | "running";
+
+/** Moves a job to `failed`. Only rows still in one of `statuses` (default: `queued` and `running`) change. */
 export async function failJob(
   env: Env,
   type: JobType,
   jobId: string,
   error: { code: string; message: string },
   nowIso: string,
+  statuses: FailableStatus[] = ["queued", "running"],
 ): Promise<boolean> {
   const db = getDb(env);
   const changes = { status: "failed" as const, errorCode: error.code, errorMessage: error.message, finishedAt: nowIso };
@@ -63,14 +67,14 @@ export async function failJob(
     const rows = await db
       .update(connectionTests)
       .set(changes)
-      .where(and(eq(connectionTests.id, jobId), inArray(connectionTests.status, ["queued", "running"])))
+      .where(and(eq(connectionTests.id, jobId), inArray(connectionTests.status, statuses)))
       .returning({ id: connectionTests.id });
     return rows.length > 0;
   }
   const rows = await db
     .update(backups)
     .set(changes)
-    .where(and(eq(backups.id, jobId), inArray(backups.status, ["queued", "running"])))
+    .where(and(eq(backups.id, jobId), inArray(backups.status, statuses)))
     .returning({ targetId: backups.targetId });
   const [row] = rows;
   if (!row) return false;

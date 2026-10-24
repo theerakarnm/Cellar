@@ -4,6 +4,7 @@ import { backups, connectionTests, targets } from "../../../src/worker/db/schema
 import { getDb } from "../../../src/worker/db/client";
 import type { Env } from "../../../src/worker/env";
 import { enqueueDueBackups, queueConnectionTest, queueManualBackup, scheduleSlot } from "../../../src/worker/jobs/dispatch";
+import type { JobMessage } from "../../../src/worker/jobs/types";
 import { createTestEnv } from "../../helpers/env";
 import { DUE_SLOT, fakeQueue, insertBackup, insertTarget, NOW } from "./fixtures";
 
@@ -103,6 +104,33 @@ describe("enqueueDueBackups", () => {
     await enqueueDueBackups(failingEnv, NOW);
     expect(await allBackups()).toHaveLength(1);
     expect((await allBackups())[0]).toMatchObject({ id: "crashed", status: "failed", errorCode: "enqueue_failed" });
+    expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
+  });
+
+  it("keeps the slot row running when the consumer claims it before the failing re-send", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // The queue claims the row (the consumer's guarded UPDATE wins the race) and then the send fails.
+    const racingQueue = {
+      send: async (message: JobMessage) => {
+        await getDb(env)
+          .update(backups)
+          .set({ status: "running", startedAt: NOW.toISOString(), heartbeatAt: NOW.toISOString(), attempt: 1 })
+          .where(eq(backups.id, message.jobId));
+        throw new Error("queue down");
+      },
+    } as unknown as Queue<JobMessage>;
+    await insertTarget(env, "t1");
+    await insertBackup(env, "crashed", "t1", { status: "queued", trigger: "schedule", scheduleSlot: DUE_SLOT });
+    await enqueueDueBackups({ ...env, JOBS: racingQueue } as Env, NOW);
+    expect(await allBackups()).toHaveLength(1);
+    expect((await allBackups())[0]).toMatchObject({
+      id: "crashed",
+      status: "running",
+      errorCode: null,
+      errorMessage: null,
+      finishedAt: null,
+    });
+    expect((await getDb(env).select().from(targets).where(eq(targets.id, "t1")))[0]?.lastStatus).toBeNull();
     expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
   });
 

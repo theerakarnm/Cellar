@@ -20,14 +20,25 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-/** Sends the queue message. If the send fails, the row is marked failed so it never sits `queued` for an hour. */
+/**
+ * Sends the queue message. If the send fails, the row is marked failed so it never sits `queued` for an
+ * hour - but only while it is still `queued`: a row the consumer already claimed is running a live
+ * container, so it is left alone.
+ */
 async function enqueue(env: Env, message: JobMessage, now: Date): Promise<boolean> {
   try {
     await env.JOBS.send(message);
     return true;
   } catch {
     console.error(`jobs: enqueue failed for ${message.type} ${message.jobId}`);
-    await failJob(env, message.type, message.jobId, { code: "enqueue_failed", message: "The job could not be queued" }, now.toISOString());
+    await failJob(
+      env,
+      message.type,
+      message.jobId,
+      { code: "enqueue_failed", message: "The job could not be queued" },
+      now.toISOString(),
+      ["queued"],
+    );
     return false;
   }
 }
