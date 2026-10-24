@@ -6,7 +6,7 @@ export type Db = ReturnType<typeof getDb>;
 export const jobMessageSchema = z
   .object({
     jobId: z.string().min(1),
-    type: z.enum(["backup", "test"]),
+    type: z.enum(["backup", "test", "restore"]),
     targetId: z.string().min(1),
   })
   .strict();

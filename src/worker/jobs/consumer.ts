@@ -7,6 +7,7 @@ import { buildJobPayload, type JobPayload } from "./payload";
 import { buildBackupKey } from "../lib/r2-key";
 import { redactError } from "../lib/redact";
 import { claimJob, failJob, readJobStatus } from "./state";
+import { runRestoreJob } from "./restore-job";
 import { jobMessageSchema, QUEUE_RETRY_DELAY_SECONDS } from "./types";
 
 export interface ConsumerDeps {
@@ -17,6 +18,8 @@ export interface ConsumerDeps {
 
 export interface QueueMessageLike {
   body: unknown;
+  /** Queues delivery count, starting at 1. */
+  attempts?: number;
   ack(): void;
   retry(options?: { delaySeconds?: number }): void;
 }
@@ -36,6 +39,13 @@ export async function handleJobMessage(env: Env, message: QueueMessageLike, deps
   const now = deps.now();
   const nowIso = now.toISOString();
   const db = getDb(env);
+
+  if (type === "restore") {
+    const outcome = await runRestoreJob(env, { jobId, attempts: message.attempts ?? 1 }, now);
+    if (outcome === "retry") message.retry({ delaySeconds: QUEUE_RETRY_DELAY_SECONDS });
+    else message.ack();
+    return;
+  }
 
   const status = await readJobStatus(env, type, jobId);
   if (status !== "queued") {
