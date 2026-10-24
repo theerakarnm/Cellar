@@ -1,3 +1,4 @@
+import { checkStaleness } from "./alerts/staleness";
 import { app } from "./app";
 import type { Env } from "./env";
 import { handleJobMessage } from "./jobs/consumer";
@@ -13,6 +14,7 @@ export default {
 
   async scheduled(controller, env, ctx) {
     await runCronTick(env, new Date(controller.scheduledTime));
+    await checkStaleness(env, new Date(controller.scheduledTime));
     ctx.waitUntil(triggerDailyRetention(env, new Date(controller.scheduledTime)));
   },
 
