@@ -19,7 +19,7 @@
   },
   "triggers": { "crons": ["* * * * *"] },
   // Placeholders. Local development overrides them in .dev.vars. Never commit a real account id.
-  "vars": { "R2_BUCKET": "cellar-backups", "R2_ENDPOINT": "https://ACCOUNT_ID.r2.cloudflarestorage.com" },
+  "vars": { "APP_BASE_URL": "https://cellar.example.com", "R2_BUCKET": "cellar-backups", "R2_ENDPOINT": "https://ACCOUNT_ID.r2.cloudflarestorage.com" },
   "containers": [
     {
       "class_name": "JobRunner",

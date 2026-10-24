@@ -33,3 +33,6 @@ R2_REGION=
 # Set it only if the outbound handler does not work; then also add an Access bypass for the
 # exact path /internal/jobs/callback.
 CALLBACK_BASE_URL=
+
+# Public base URL of the deployed UI. Alert messages link to ${APP_BASE_URL}/targets/<id>. Not a secret.
+APP_BASE_URL=http://localhost:8787

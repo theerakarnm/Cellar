@@ -40,6 +40,7 @@ export async function createTestEnv(overrides: Partial<Env> = {}): Promise<{ env
   const env: Env = {
     ...proxy.env,
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+    APP_BASE_URL: "https://cellar.test",
     ACCESS_TEAM_DOMAIN: "test.cloudflareaccess.com",
     ACCESS_AUD: "test-aud",
     DEV_BYPASS: "true",

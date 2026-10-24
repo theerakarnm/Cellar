@@ -9,6 +9,7 @@ export interface Env {
   ENCRYPTION_KEY: string;
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
+  APP_BASE_URL: string;
   DEV_BYPASS?: string;
   R2_ENDPOINT: string;
   R2_BUCKET: string;
