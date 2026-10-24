@@ -49,10 +49,11 @@ Flow summary:
 cellar/
   AGENTS.md
   README.md  LICENSE  CONTRIBUTING.md  SECURITY.md      (OSS files in phase 10)
+  .github/workflows/ci.yml                               (typecheck + test, phase 10)
   package.json  bun.lock  tsconfig.json  vitest.config.ts
   wrangler.jsonc  drizzle.config.ts  .dev.vars.example
   migrations/                  drizzle-kit SQL output
-  docs/  PLAN.md  research-notes.md
+  docs/  PLAN.md  research-notes.md  vm-onboarding.md  restore-runbook.md  plans/
   src/shared/                  Code shared by Worker and UI: zod schemas, tz.ts, cron.ts
   src/worker/
     index.ts                   Worker entry: fetch, scheduled, queue
@@ -372,7 +373,7 @@ cloudflared access tcp --hostname db.example.com --url 127.0.0.1:15432 \
 ```
 Then `pg_dump` connects to `127.0.0.1:15432`. The image installs `cloudflared` and postgresql-client 13-18.
 
-Setup per VM: a named Tunnel with a public hostname of type TCP (`tcp://postgres:5432`), a self-hosted Access application on that hostname, and a Service Auth policy that allows only Cellar's service token.
+Setup per VM: a named Tunnel with a public hostname of type TCP (`tcp://postgres:5432`), a self-hosted Access application on that hostname, and a Service Auth policy that allows only Cellar's service token. Step by step: [vm-onboarding.md](./vm-onboarding.md).
 
 Reasoning:
 - Workers VPC / VPC Services bindings are Worker-only. The docs show no path from a Container to them. [uncertain]
