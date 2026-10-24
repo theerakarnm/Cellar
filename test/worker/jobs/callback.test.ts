@@ -8,6 +8,7 @@ import { app } from "../../../src/worker/app";
 import { SIGNATURE_VECTOR } from "../../../container/contract";
 import { createTestEnv } from "../../helpers/env";
 import { seedChannel } from "../../helpers/alerts-seed";
+import { createExecutionContext } from "../../helpers/exec-ctx";
 import { insertBackup, insertTarget, insertTest, NOW, signedHeaders } from "./fixtures";
 
 let env: Env;
@@ -221,12 +222,13 @@ describe("POST /internal/jobs/callback", () => {
 
 describe("backup alerts on callback", () => {
   let fetchSpy: MockInstance<typeof fetch>;
-  const postRoute = async (body: string) => {
+  const postRoute = async (body: string, ctx?: ExecutionContext) => {
     const signed = await signedHeaders(env, JSON.parse(body).jobId, body, Date.now() / 1000);
     const response = await app.request(
       "http://localhost/internal/jobs/callback",
       { method: "POST", body, headers: { "X-Cellar-Timestamp": signed.timestamp, "X-Cellar-Signature": signed.signature } },
       env,
+      ctx,
     );
     return { response };
   };
@@ -267,7 +269,10 @@ describe("backup alerts on callback", () => {
   });
 
   it("sends no alert for a succeeded callback", async () => {
-    await postRoute(event("b1", "succeeded", 2, { result: { sizeBytes: 5, sha256: SHA } }));
+    const ctx = createExecutionContext();
+    const { response } = await postRoute(event("b1", "succeeded", 2, { result: { sizeBytes: 5, sha256: SHA } }), ctx);
+    await ctx.settled();
+    expect(response.status).toBe(200);
     expect((await backupRow())?.status).toBe("success");
     expect(discordCalls()).toHaveLength(0);
   });

@@ -117,6 +117,25 @@ describe("sweepStaleJobs backup alerts", () => {
     expect(discordBodies()[0]).toContain("Backup failed");
   });
 
+  it("stops the container before waiting on a hung alert webhook", async () => {
+    const order: string[] = [];
+    const recordStop = async (id: string) => {
+      order.push(`stop:${id}`);
+    };
+    fetchSpy.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          order.push("fetch");
+          (init as RequestInit).signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+    await insertBackup(env, "lost", "t1", { status: "running", startedAt: minutesAgo(30), heartbeatAt: minutesAgo(6) });
+    await sweepStaleJobs(env, NOW, recordStop);
+    expect(order[0]).toBe("stop:lost");
+    expect(order).toContain("fetch");
+    expect(order.indexOf("stop:lost")).toBeLessThan(order.indexOf("fetch"));
+  }, 20_000);
+
   it("sends no alert for a finished backup or for a connection test", async () => {
     await insertBackup(env, "done", "t1", { status: "success", startedAt: minutesAgo(500), heartbeatAt: minutesAgo(500), queuedAt: minutesAgo(500) });
     await insertTest(env, "slow", "t1", { status: "running", startedAt: minutesAgo(6), heartbeatAt: minutesAgo(0) });

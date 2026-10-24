@@ -39,6 +39,7 @@ async function handleBackupFinished(env: Env, backupId: string): Promise<void> {
       errorCode: backups.errorCode,
       errorMessage: backups.errorMessage,
       finishedAt: backups.finishedAt,
+      deletedAt: targets.deletedAt,
       targetId: targets.id,
       name: targets.name,
       projectTag: targets.projectTag,
@@ -48,7 +49,7 @@ async function handleBackupFinished(env: Env, backupId: string): Promise<void> {
     .innerJoin(targets, eq(backups.targetId, targets.id))
     .where(eq(backups.id, backupId))
     .get();
-  if (!row) return;
+  if (!row || row.deletedAt) return;
 
   if (row.status === "success") {
     await db

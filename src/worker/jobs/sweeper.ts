@@ -60,9 +60,9 @@ export async function sweepStaleJobs(env: Env, now: Date, stop: (jobId: string) 
       .returning({ id: backups.id });
     if (changed.length === 0) continue;
     await db.update(targets).set({ lastStatus: "timed_out" }).where(eq(targets.id, row.targetId));
+    await stop(row.id);
     await notifyBackupFinished(env, row.id);
     result.timedOut.push(row.id);
-    await stop(row.id);
   }
 
   const runningTests = await db

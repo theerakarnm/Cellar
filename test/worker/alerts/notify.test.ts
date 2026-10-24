@@ -82,6 +82,13 @@ describe("notifyBackupFinished", () => {
     expect((await targetRow(env, "t2"))?.consecutive_failures).toBe(1);
   });
 
+  it("sends nothing for a backup of a soft-deleted target", async () => {
+    await env.DB.prepare("UPDATE targets SET deleted_at = ? WHERE id = 't1'").bind("2026-10-24T01:00:00.000Z").run();
+    await finish("failed");
+    await finish("timed_out");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("never puts connection URLs or passwords in the delivered message", async () => {
     await finish("failed", { error_code: "DUMP_FAILED", error_message: `could not connect ${SECRET_URL} password=hunter2-hunter2` });
     const text = sentTexts()[0] ?? "";
