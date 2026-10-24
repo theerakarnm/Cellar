@@ -2,11 +2,12 @@ import { and, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { signCallback } from "../../../container/hmac";
 import { getDb } from "../db/client";
-import { backups, connectionTests, targets } from "../db/schema";
+import { backups, connectionTests, restores, targets } from "../db/schema";
 import type { Env } from "../env";
 import { deriveJobKey } from "../lib/job-key";
 import { redactSecrets } from "../lib/redact";
 import { ApiError } from "../lib/api-error";
+import { handleRestoreCallback } from "./restore-callback";
 import { CALLBACK_WINDOW_SECONDS, MAX_CALLBACK_BODY_BYTES, type Db, type JobType } from "./types";
 
 const callbackSchema = z.object({
@@ -105,6 +106,15 @@ export async function handleCallback(env: Env, rawBody: string, headers: Callbac
   if (test) {
     const applied = await applyTestEvent(db, payload, nowIso);
     return { applied, type: "test", event: payload.event, targetId: test.targetId };
+  }
+  const [restore] = await db
+    .select({ targetId: restores.destinationTargetId })
+    .from(restores)
+    .where(eq(restores.id, payload.jobId))
+    .limit(1);
+  if (restore) {
+    const applied = (await handleRestoreCallback(db, payload, now)) === "applied";
+    return { applied, type: "restore", event: payload.event, targetId: restore.targetId };
   }
   throw new ApiError(404, "not_found", "Unknown job");
 }
