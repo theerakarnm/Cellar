@@ -1,30 +1,26 @@
 import { describe, expect, it } from "vitest";
-import type { Backup, RetentionPreview } from "../../../ui/src/api/types";
+import type { RetentionPreview } from "../../../ui/src/api/types";
 import { deletionRows } from "../../../ui/src/lib/preview";
 
-const backup = { id: "b1" } as Backup;
 const preview: RetentionPreview = {
   dryRun: true,
   keep: ["b3"],
   delete: [
     { id: "b1", startedAt: "2026-10-01T02:00:00.000Z", sizeBytes: 1024, reason: "max_age_days" },
-    { id: "b2", startedAt: "2026-09-01T02:00:00.000Z", sizeBytes: null, reason: "keep_last" },
+    { id: "b2", startedAt: "2026-09-01T02:00:00.000Z", sizeBytes: null, reason: "no_rule_keeps_it" },
   ],
   reasons: { b3: ["keep_last"] },
 };
 
 describe("deletionRows", () => {
-  it("joins delete entries to loaded backups, with empty reasons when unmapped", () => {
-    expect(deletionRows(preview, [backup])).toEqual([
-      { id: "b1", backup, reasons: [] },
-      { id: "b2", backup: undefined, reasons: [] },
+  it("uses each delete entry's start time, size and reason", () => {
+    expect(deletionRows(preview)).toEqual([
+      { id: "b1", startedAt: "2026-10-01T02:00:00.000Z", sizeBytes: 1024, reasons: ["max age days"] },
+      { id: "b2", startedAt: "2026-09-01T02:00:00.000Z", sizeBytes: null, reasons: ["no rule keeps it"] },
     ]);
   });
-  it("joins mapped reasons for a delete id", () => {
-    const rows = deletionRows({ ...preview, reasons: { b2: ["keep_last"] } }, []);
-    expect(rows).toEqual([
-      { id: "b1", backup: undefined, reasons: [] },
-      { id: "b2", backup: undefined, reasons: ["keep_last"] },
-    ]);
+  it("adds mapped reasons for a delete id without repeating the entry reason", () => {
+    const rows = deletionRows({ ...preview, reasons: { b2: ["keep_last", "no_rule_keeps_it"] } });
+    expect(rows[1]?.reasons).toEqual(["no rule keeps it", "keep last"]);
   });
 });

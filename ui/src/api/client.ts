@@ -10,6 +10,9 @@ export class ApiError extends Error {
   }
 }
 
+/** A failed fetch is usually a cross-origin redirect to the Access login, so the page must reload. */
+export const NETWORK_MESSAGE = "Cannot reach the server. If you use Cloudflare Access, your session may have expired: reload the page.";
+
 export function withQuery(path: string, params: Record<string, string | number | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -20,11 +23,17 @@ export function withQuery(path: string, params: Record<string, string | number |
 }
 
 export async function api<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (e) {
+    if (e instanceof TypeError) throw new ApiError(0, "network", NETWORK_MESSAGE);
+    throw e;
+  }
   if (response.status === 204) return undefined as T;
   let parsed: unknown;
   try {

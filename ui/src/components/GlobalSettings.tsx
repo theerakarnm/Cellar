@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useLoad } from "../api/hooks";
 import type { Settings } from "../api/types";
@@ -11,6 +11,7 @@ export function GlobalSettings() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
+  const saveInFlight = useRef(false);
 
   useEffect(() => {
     if (settings.data) {
@@ -23,7 +24,8 @@ export function GlobalSettings() {
   const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 10;
 
   async function save() {
-    if (saving) return;
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
     setError(undefined);
     setSaved(false);
     setSaving(true);
@@ -34,6 +36,7 @@ export function GlobalSettings() {
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   }

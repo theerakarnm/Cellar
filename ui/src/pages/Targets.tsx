@@ -17,7 +17,15 @@ export function Targets() {
       </div>
       <ErrorNote error={targets.error} />
       <Loading loading={targets.loading} hasData={targets.data !== undefined} />
-      {targets.data ? (
+      {targets.data?.length === 0 ? (
+        <div className="empty-state">
+          <p className="muted">No targets yet.</p>
+          <Link className="button primary" to="/targets/new">
+            New target
+          </Link>
+        </div>
+      ) : null}
+      {targets.data && targets.data.length > 0 ? (
         <table className="stack">
           <thead>
             <tr>

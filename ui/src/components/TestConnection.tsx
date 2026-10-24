@@ -10,10 +10,13 @@ export function TestConnection({ targetId }: { targetId: string }) {
   const [error, setError] = useState<Error | undefined>();
   const [busy, setBusy] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
+  const starting = useRef(false);
 
   useEffect(() => () => controller.current?.abort(), []);
 
   async function run() {
+    if (starting.current) return;
+    starting.current = true;
     const abort = new AbortController();
     controller.current = abort;
     setBusy(true);
@@ -32,6 +35,7 @@ export function TestConnection({ targetId }: { targetId: string }) {
     } catch (e) {
       if (!abort.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
     } finally {
+      starting.current = false;
       if (!abort.signal.aborted) setBusy(false);
     }
   }
@@ -41,7 +45,7 @@ export function TestConnection({ targetId }: { targetId: string }) {
       <button type="button" onClick={run} disabled={busy}>
         {busy ? "Testing..." : "Test connection"}
       </button>
-      <span className="hint">Tests the saved settings.</span>
+      <span className="hint test-hint">Tests the saved settings.</span>
       <ErrorNote error={error} />
       {test ? (
         <p className={`note ${test.status === "success" ? "note-ok" : test.status === "failed" || test.status === "timed_out" ? "note-error" : ""}`} role="status">

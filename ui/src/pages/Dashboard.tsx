@@ -75,13 +75,13 @@ export function Dashboard() {
                         <StatusBadge status={target.lastStatus} />
                       </div>
                     </td>
-                    <td data-label="Last success">
+                    <td data-label="Last success" className="nowrap">
                       <div className="cell-value">
                         {formatInTimeZone(target.lastBackupAt, target.timezone)}
                         <span className="muted block">{formatRelative(target.lastBackupAt, now)}</span>
                       </div>
                     </td>
-                    <td data-label="Next run">
+                    <td data-label="Next run" className="nowrap">
                       <div className="cell-value">{target.enabled ? formatInTimeZone(target.nextRunAt, target.timezone) : "-"}</div>
                     </td>
                     <td data-label="R2 size" className="num size">

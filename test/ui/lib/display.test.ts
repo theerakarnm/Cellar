@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionLabel, formatBytes, formatDuration, secretLabel } from "../../../ui/src/lib/display";
+import { connectionLabel, formatBytes, formatDuration, secretLabel, shortId } from "../../../ui/src/lib/display";
 
 describe("display", () => {
   it.each([
@@ -26,6 +26,10 @@ describe("display", () => {
   it("labels secrets as set or not set and never takes a value", () => {
     expect(secretLabel(true)).toBe("set");
     expect(secretLabel(false)).toBe("not set");
+  });
+
+  it("labels an id by its last 8 characters", () => {
+    expect(shortId("0190f2a8-1c3d-7e4f-9a2b-6c5d4e3f2a1b")).toBe("4e3f2a1b");
   });
 
   it("formats the masked connection without a password", () => {

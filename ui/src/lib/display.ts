@@ -24,6 +24,11 @@ export function secretLabel(isSet: boolean): "set" | "not set" {
   return isSet ? "set" : "not set";
 }
 
+/** UUIDv7 ids share their first characters (the timestamp), so labels use the random tail. */
+export function shortId(id: string): string {
+  return id.slice(-8);
+}
+
 export function connectionLabel(connection: { host: string; port: number; dbName: string; user: string }): string {
   return `${connection.user}@${connection.host}:${connection.port}/${connection.dbName}`;
 }

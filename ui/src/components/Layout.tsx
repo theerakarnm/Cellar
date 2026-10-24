@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router";
 
-export function Layout() {
+export function Layout({ children }: { children?: ReactNode }) {
   return (
     <>
       <header className="topbar">
@@ -16,7 +17,7 @@ export function Layout() {
         </nav>
       </header>
       <main className="page">
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
     </>
   );

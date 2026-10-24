@@ -2,19 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollUntil } from "../api/poll";
 import type { Backup, RestoreRun, TargetSummary } from "../api/types";
+import { formatBytes } from "../lib/display";
 import { canSubmitRestore, restoreRequest } from "../lib/restore";
 import { isTerminalStatus } from "../lib/status";
+import { formatInTimeZone } from "../lib/time";
 import { Dialog, ErrorNote, Field } from "./ui";
 
-export function RestoreDialog({ backup, targets, onClose }: { backup: Backup | undefined; targets: TargetSummary[]; onClose: () => void }) {
+export function RestoreDialog({
+  backup,
+  source,
+  targets,
+  onClose,
+}: {
+  backup: Backup | undefined;
+  source: TargetSummary;
+  targets: TargetSummary[];
+  onClose: () => void;
+}) {
   return (
     <Dialog open={backup !== undefined} title="Restore backup" onClose={onClose}>
-      {backup ? <RestoreForm key={backup.id} backup={backup} targets={targets} onClose={onClose} /> : null}
+      {backup ? <RestoreForm key={backup.id} backup={backup} source={source} targets={targets} onClose={onClose} /> : null}
     </Dialog>
   );
 }
 
-function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: TargetSummary[]; onClose: () => void }) {
+function RestoreForm({ backup, source, targets, onClose }: { backup: Backup; source: TargetSummary; targets: TargetSummary[]; onClose: () => void }) {
   const [destinationId, setDestinationId] = useState("");
   const [typedName, setTypedName] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -23,6 +35,7 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
   const [run, setRun] = useState<RestoreRun | undefined>();
   const [restoreId, setRestoreId] = useState<string | undefined>();
   const controller = useRef<AbortController | undefined>(undefined);
+  const submitting = useRef(false);
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -31,7 +44,8 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
   const ready = canSubmitRestore({ typedName, destinationName: destination?.name ?? "", sameDatabase, acknowledged });
 
   async function submit() {
-    if (!destination || busy || restoreId) return;
+    if (!destination || submitting.current || restoreId) return;
+    submitting.current = true;
     const abort = new AbortController();
     controller.current = abort;
     setBusy(true);
@@ -50,6 +64,7 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
     } catch (e) {
       if (!abort.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
     } finally {
+      submitting.current = false;
       if (!abort.signal.aborted) setBusy(false);
     }
   }
@@ -61,6 +76,10 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
         void submit();
       }}
     >
+      <p className="backup-source">
+        Backup of <strong className="wrap-anywhere">{source.name}</strong> from {formatInTimeZone(backup.startedAt ?? backup.queuedAt, source.timezone)} (
+        {formatBytes(backup.sizeBytes)})
+      </p>
       <p>
         Restores run <code>pg_restore</code> into the database stored as the destination target&apos;s restore URL. Nothing is created. Existing objects can be overwritten.
       </p>
@@ -93,6 +112,11 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
         <p className={`note ${run.status === "success" ? "note-ok" : isTerminalStatus(run.status) ? "note-error" : ""}`} role="status">
           Restore {run.status.replace("_", " ")}
           {run.errorMessage ? `: ${run.errorMessage}` : ""}
+        </p>
+      ) : null}
+      {busy || restoreId !== undefined ? (
+        <p className="hint" role="status">
+          The restore continues in the background if you close this dialog. This page does not show its result after you close it.
         </p>
       ) : null}
       <div className="actions">

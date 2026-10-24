@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, listAll, withQuery } from "../../../ui/src/api/client";
+import { ApiError, NETWORK_MESSAGE, api, listAll, withQuery } from "../../../ui/src/api/client";
 
 function stubFetch(...responses: Response[]) {
   const fetchMock = vi.fn();
@@ -27,6 +27,13 @@ describe("api", () => {
   it("turns the error envelope into an ApiError", async () => {
     stubFetch(Response.json({ error: { code: "conflict", message: "Name taken" } }, { status: 409 }));
     await expect(api("POST", "/api/x", {})).rejects.toMatchObject({ status: 409, code: "conflict", message: "Name taken" });
+  });
+
+  it("reports a failed fetch as a network error that says to reload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch")));
+    const error = await api("GET", "/api/x").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 0, code: "network", message: NETWORK_MESSAGE });
   });
 
   it("reports a non-JSON body (for example an Access login page) as bad_response", async () => {

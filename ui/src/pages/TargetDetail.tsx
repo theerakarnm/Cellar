@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api, listAll, withQuery } from "../api/client";
 import { useLoad } from "../api/hooks";
@@ -6,7 +6,7 @@ import type { Backup, Page, RetentionPreview, TargetSummary } from "../api/types
 import { RestoreDialog } from "../components/RestoreDialog";
 import { TestConnection } from "../components/TestConnection";
 import { ErrorNote, HealthBadge, Loading, SecretBadge, StatusBadge } from "../components/ui";
-import { connectionLabel, formatBytes, formatDuration } from "../lib/display";
+import { connectionLabel, formatBytes, formatDuration, shortId } from "../lib/display";
 import { deletionRows } from "../lib/preview";
 import { classifyTarget, isActiveStatus } from "../lib/status";
 import { formatInTimeZone } from "../lib/time";
@@ -31,6 +31,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
   const [restoreFrom, setRestoreFrom] = useState<Backup | undefined>();
   const [preview, setPreview] = useState<RetentionPreview | undefined>();
   const allTargets = useLoad(() => listAll<TargetSummary>("/api/targets"), []);
+  const queueing = useRef(false);
 
   const backups = [...(first.data?.items ?? []), ...more];
   const nextCursor = cursor === undefined ? (first.data?.nextCursor ?? null) : cursor;
@@ -38,6 +39,8 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
   const fail = (e: unknown) => setActionError(e instanceof Error ? e : new Error(String(e)));
 
   async function backupNow() {
+    if (queueing.current) return;
+    queueing.current = true;
     setActionError(undefined);
     try {
       await api("POST", `/api/targets/${target.id}/backup`);
@@ -47,6 +50,8 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
       onChanged();
     } catch (e) {
       fail(e);
+    } finally {
+      queueing.current = false;
     }
   }
 
@@ -71,20 +76,6 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
     }
   }
 
-  async function remove(backup: Backup) {
-    if (!window.confirm("Delete this backup? The file is removed from R2 and cannot be recovered.")) return;
-    setActionError(undefined);
-    try {
-      await api("DELETE", `/api/backups/${backup.id}`, { confirm: true });
-      setMore([]);
-      setCursor(undefined);
-      first.reload();
-      onChanged();
-    } catch (e) {
-      fail(e);
-    }
-  }
-
   async function enable() {
     setActionError(undefined);
     try {
@@ -104,7 +95,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
     }
   }
 
-  const rows = preview ? deletionRows(preview, backups) : [];
+  const rows = preview ? deletionRows(preview) : [];
   return (
     <>
       <div className="page-head">
@@ -178,17 +169,21 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                 <tr>
                   <th>Backup</th>
                   <th>Started</th>
-                  <th>Reasons</th>
+                  <th className="num">Size</th>
+                  <th>Reason</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td data-label="Backup" className="mono">
-                      {row.id.slice(0, 8)}
+                    <td data-label="Backup" className="mono" title={row.id}>
+                      {shortId(row.id)}
                     </td>
-                    <td data-label="Started">{row.backup ? formatInTimeZone(row.backup.startedAt ?? row.backup.queuedAt, tz) : "not on a loaded page"}</td>
-                    <td data-label="Reasons">{row.reasons.join(", ") || "-"}</td>
+                    <td data-label="Started">{formatInTimeZone(row.startedAt, tz)}</td>
+                    <td data-label="Size" className="num size">
+                      {formatBytes(row.sizeBytes)}
+                    </td>
+                    <td data-label="Reason">{row.reasons.join(", ")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -236,9 +231,6 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                       <button type="button" onClick={() => setRestoreFrom(backup)}>
                         Restore
                       </button>
-                      <button type="button" className="danger" onClick={() => remove(backup)}>
-                        Delete
-                      </button>
                     </div>
                   ) : null}
                 </td>
@@ -255,7 +247,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
         </p>
       ) : null}
 
-      <RestoreDialog backup={restoreFrom} targets={allTargets.data ?? []} onClose={() => setRestoreFrom(undefined)} />
+      <RestoreDialog backup={restoreFrom} source={target} targets={allTargets.data ?? []} onClose={() => setRestoreFrom(undefined)} />
     </>
   );
 }

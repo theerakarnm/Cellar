@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, listAll, withQuery } from "../api/client";
 import { useLoad } from "../api/hooks";
 import type { AuditEntry, Page, TargetSummary } from "../api/types";
+import { shortId } from "../lib/display";
 import { formatInTimeZone, timeZoneForAudit } from "../lib/time";
 import { ErrorNote, Field } from "./ui";
 
@@ -68,7 +69,7 @@ export function AuditLog() {
                 </td>
                 <td data-label="Entity" className="mono">
                   <span title={entry.entityId ?? undefined}>
-                    {entry.entityId ? `${entry.entityType} ${entry.entityId.slice(0, 8)}` : entry.entityType}
+                    {entry.entityId ? `${entry.entityType} ${shortId(entry.entityId)}` : entry.entityType}
                   </span>
                 </td>
                 <td data-label="Details">

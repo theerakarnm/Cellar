@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, listAll } from "../api/client";
 import { useLoad } from "../api/hooks";
 import type { AlertChannel } from "../api/types";
@@ -100,13 +100,15 @@ function ChannelFormView({ initial, id, onClose, onSaved }: { initial: ChannelFo
   const [form, setForm] = useState(initial);
   const [error, setError] = useState<Error | undefined>();
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const mode = id ? "edit" : "create";
   const patch = (change: Partial<ChannelForm>) => setForm((prev) => ({ ...prev, ...change }));
 
   async function save() {
-    if (saving) return;
+    if (saveInFlight.current) return;
     const built = channelPayload(form, mode);
     if ("error" in built) return setError(new Error(built.error));
+    saveInFlight.current = true;
     setSaving(true);
     try {
       await (id ? api("PATCH", `/api/alert-channels/${id}`, built.body) : api("POST", "/api/alert-channels", built.body));
@@ -114,6 +116,8 @@ function ChannelFormView({ initial, id, onClose, onSaved }: { initial: ChannelFo
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
       setSaving(false);
+    } finally {
+      saveInFlight.current = false;
     }
   }
 
