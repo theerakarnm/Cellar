@@ -264,7 +264,7 @@ The container runs `bun run /app/entrypoint.ts` and reads one JSON document from
 }
 ```
 `r2` is used by backup and restore only. `restore` only by restore.
-`r2.region` is optional (default `auto`). The `tunnel` block is always required (there is no direct mode). The host and port of `db.url` are ignored: the runner connects to `127.0.0.1:tunnel.localPort`. `restore.targetDbName` is informational; the database comes from `db.url`. Exit codes: 0 success, 1 failed or timed out, 2 invalid job input (no callback is possible).
+`r2.region` is optional (default `auto`). The `tunnel` block is always required (there is no direct mode). The host and port of `db.url` are ignored: the runner connects to `127.0.0.1:tunnel.localPort`. `restore.targetDbName` must equal the database in `db.url` (decoded); the runner rejects a mismatch with INVALID_JOB before any restore step. The Worker must send the decoded database name from `db.url`, never a sanitized name. Exit codes: 0 success, 1 failed or timed out (including INVALID_JOB detected after parsing, with a callback), 2 job input that cannot be parsed (no callback is possible).
 The R2 S3 credentials are a bucket-scoped R2 token stored as a Worker secret. They are injected into the container per job at runtime. They are never baked into the image, never logged, and never placed in queue messages (the message carries ids only). Presigned per-part URLs are a possible future hardening step.
 
 ### Container steps
