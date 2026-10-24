@@ -66,9 +66,10 @@ cellar/
     jobs/  dispatch.ts  consumer.ts  callback.ts  sweeper.ts
     alerts/  line.ts  discord.ts  staleness.ts
     container/  job-runner.ts  (Container class)
-  container/                   image build context
-    Dockerfile (FROM oven/bun:1.3.9-slim)  entrypoint.ts  jobs/ test-connection.ts backup.ts restore.ts
-    tunnel.ts  multipart.ts  hmac.ts
+  container/                   runner source; image built from the repo root with container/Dockerfile
+    Dockerfile  Dockerfile.dockerignore  tsconfig.json  entrypoint.ts  job.ts  pg.ts  redact.ts  process.ts
+    s3.ts  upload.ts  tunnel.ts  callback.ts  hmac.ts  jobs/ context.ts test-connection.ts backup.ts restore.ts
+    scripts/ tunnel-spike.sh   test/ (Vitest unit tests)   e2e/ (Docker scripts)
   ui/                          Vite + React SPA (built into dist/ui, served as Static Assets)
   test/                        Vitest, mirrors src/ (test/worker/, test/shared/)
 ```
@@ -79,6 +80,7 @@ Notes:
 - Audit rows are written by `src/worker/lib/audit.ts` (a helper, not middleware). Services commit the audit insert in the same `db.batch` as the change.
 - Cron grammar is numeric 5-field (no names, no @macros). A wall time inside a DST gap runs just after the gap; a wall time that happens twice runs once.
 - `container/hmac.ts` is the single HMAC implementation (WebCrypto only). The Worker imports it by relative path.
+- The image build context is the repo root. The runner shares `src/worker/lib/redact.ts` with the Worker.
 - `DEV_BYPASS` is honoured only when its value is exactly `"true"` and the request host is `localhost`, `127.0.0.1`, or `[::1]`.
 - Cron and timezone code is in-house in `src/shared/` (no dependency). Retention imports `getZonedParts` from `src/shared/tz.ts`.
 - Connection mode is tunnel only. There is no direct mode.
@@ -247,7 +249,7 @@ Queue message (small, under the 128KB limit):
 The consumer loads the target, decrypts secrets in memory only, and starts the container with the payload below.
 
 ### Input payload (Worker to container)
-The container runs `bun run /app/entrypoint.ts` and reads this JSON from stdin. Secrets are never passed in command-line args or env vars. Phase 4 exports `signCallback`, and a contract test pins the payload and signature format so the Worker side (Phase 5) cannot drift from it:
+The container runs `bun run /app/entrypoint.ts` and reads one JSON document from stdin (secrets never in env vars or command-line args). Phase 4 exports `signCallback`, and a contract test pins the payload and signature format so the Worker side (Phase 5) cannot drift from it:
 ```json
 {
   "jobId": "string",
@@ -262,14 +264,15 @@ The container runs `bun run /app/entrypoint.ts` and reads this JSON from stdin. 
 }
 ```
 `r2` is used by backup and restore only. `restore` only by restore.
+`r2.region` is optional (default `auto`). The `tunnel` block is always required (there is no direct mode). The host and port of `db.url` are ignored: the runner connects to `127.0.0.1:tunnel.localPort`. `restore.targetDbName` is informational; the database comes from `db.url`. Exit codes: 0 success, 1 failed or timed out, 2 invalid job input (no callback is possible).
 The R2 S3 credentials are a bucket-scoped R2 token stored as a Worker secret. They are injected into the container per job at runtime. They are never baked into the image, never logged, and never placed in queue messages (the message carries ids only). Presigned per-part URLs are a possible future hardening step.
 
 ### Container steps
-- test: open tunnel, `SELECT version()`, check role has `pg_read_all_data`, report.
-- backup: open tunnel, pick the `pg_dump` binary matching the server major version, run `pg_dump -Fc`, pipe stdout through a sha256 hasher into multipart parts (bounded buffer of one part, 32MiB by default), `CompleteMultipartUpload`, report. On any failure, `AbortMultipartUpload`.
-- restore: stream the R2 object into `pg_restore` over the tunnel using the restore URL.
+- test: open tunnel, one `psql` query for server version, database size, and `pg_read_all_data` membership (`hasReadAllData` is `null` on PostgreSQL 13), report `{ pgServerVersion, dbSizeBytes, hasReadAllData, durationMs }`.
+- backup: open tunnel, pick the `pg_dump` binary matching the server major version, run `pg_dump -Fc`, stream the dump through a sha256 hasher into multipart parts (bounded buffer of one part, 32MiB by default), `CompleteMultipartUpload`, report. On any failure, `AbortMultipartUpload`. Parts are equal size except the last, uploaded one at a time. A non-zero `pg_dump` exit aborts the upload. The dump flows through a FIFO (`pg_dump --no-sync --file=<fifo>`) that the runner reads with a pull generator, because Bun does not apply backpressure to child stdout. Result: `{ sizeBytes, sha256, partCount, pgServerVersion, durationMs }`.
+- restore: stream the R2 object into `pg_restore --clean --if-exists --no-owner` over the tunnel using the restore URL. The runner selects the `pg_restore` binary by the destination server major (probe first), not the newest one, because `pg_restore` 17+ emits `SET transaction_timeout`, which PostgreSQL 13-16 reject. Any non-zero exit is a failure. Result: `{ durationMs }`.
 - Always: send a heartbeat callback every 30s, redact all output before sending.
-- Memory: part size is a config value (`partSizeBytes`, default 32MiB). Peak is about one part plus pg_dump and cloudflared overhead. The local memory test runs at 256MB; `basic` has 1GiB. No local disk for the dump.
+- Memory: part size is a config value (`partSizeBytes`, default 32MiB). Peak is about one part plus pg_dump and cloudflared overhead. The local memory test runs at 256MB; `basic` has 1GiB. Measured (Task 17, native arm64, podman): a 2.19 GiB database at 32 MiB parts under a `256m` limit finished with `OOMKilled=false`, peak container memory 210 MiB (read from `docker stats` and cgroup anon+sock+kernel). One part costs about 2x its size because `fetch` copies the body. No local disk for the dump.
 
 ### Callback payload (container to Worker)
 ```json
@@ -279,9 +282,11 @@ The R2 S3 credentials are a bucket-scoped R2 token stored as a Worker secret. Th
   "at": "ISO",
   "seq": 1,
   "result": { "sizeBytes": 0, "sha256": "hex", "pgServerVersion": "16.3", "durationMs": 0, "partCount": 0 },
-  "error": { "code": "TUNNEL_FAILED | AUTH_FAILED | DUMP_FAILED | UPLOAD_FAILED | TIMEOUT | UNKNOWN", "message": "redacted" }
+  "error": { "code": "TUNNEL_FAILED | AUTH_FAILED | DUMP_FAILED | UPLOAD_FAILED | DOWNLOAD_FAILED | RESTORE_FAILED | TIMEOUT | INVALID_JOB | UNKNOWN", "message": "redacted" }
 }
 ```
+
+Retries resend the same body and `seq` with a fresh timestamp. The Worker must answer 2xx for a `seq` it already applied.
 
 ### HMAC signing
 - Headers: `X-Cellar-Timestamp` (unix seconds), `X-Cellar-Signature` = hex `HMAC-SHA256(jobKey, timestamp + "." + jobId + "." + rawBody)`.
@@ -338,7 +343,7 @@ Reasoning:
 - A Container cannot be proxied through a Worker for a long `pg_dump` TCP session without extra machinery. Hyperdrive is query-oriented and not suited to `pg_dump`. [Hyperdrive private DB](https://developers.cloudflare.com/hyperdrive/configuration/connect-to-private-database/)
 - `cloudflared access tcp` is the documented way to reach a TCP app behind Access from a client: [arbitrary TCP](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/non-http/cloudflared-authentication/arbitrary-tcp/), [service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
 - Needs outbound 443 from the container. Containers have internet egress by default. [Outbound traffic](https://developers.cloudflare.com/containers/configuration/outbound-traffic/)
-- The `--service-token-id/--service-token-secret` flags were verified in the cloudflared repo, not in the current docs pages. [uncertain] The first task of Phase 4 is a spike that proves this path, before the runner is built (see below).
+- The flags exist in `cloudflared access tcp --help` (2026.10.3), which also reads `TUNNEL_SERVICE_TOKEN_ID` and `TUNNEL_SERVICE_TOKEN_SECRET`; the runner passes the token through these env vars, never argv. Spike result (Task 2): awaiting human - the spike has not been run against a real tunnel yet; the owner confirms the date and outcome. The Task 18 real-tunnel end-to-end run: also awaiting human.
 
 Spike (first task of Phase 4), run with the owner's approval of any Cloudflare resources:
 1. A container reaches a real Postgres through `cloudflared access tcp` with a service token, and runs `SELECT version()` and a small `pg_dump -Fc` to R2.
@@ -361,7 +366,7 @@ Values come from [research-notes.md](./research-notes.md). Re-check before each 
 | Area | Limit | Source | Impact / mitigation |
 |---|---|---|---|
 | Container disk | 2GB (lite) to 20GB per instance; image size counts against it | [limits](https://developers.cloudflare.com/containers/platform/limits/) | Never write the dump to disk: stream. Use a larger `instance_type` only for the log/temp space needed. |
-| Container memory | 256MiB (lite) to 12GiB | same | One multipart part buffered (32MiB by default). Default `basic` (1/4 vCPU, 1GiB, 4GB disk), set by one config value (`instance_type` in `wrangler.jsonc`). `max_instances` is 2, also a config value. |
+| Container memory | 256MiB (lite) to 12GiB | same | One multipart part buffered (32MiB by default). Measured in Phase 4 (native arm64, podman): 32 MiB parts at a `256m` limit, 2.19 GiB database, `OOMKilled=false`, peak 210 MiB (`docker stats` and cgroup anon+sock+kernel). Default `basic` (1/4 vCPU, 1GiB, 4GB disk), set by one config value (`instance_type` in `wrangler.jsonc`). `max_instances` is 2, also a config value. |
 | Container runtime | `sleepAfter` default 10m; SIGTERM then 15m grace. No hard max documented [uncertain] | [Container class](https://developers.cloudflare.com/containers/api/container-class/) | Keep the container active with heartbeat traffic; set `sleepAfter` above the longest job. Roll-outs can stop containers mid-job, so the sweeper plus retry covers it. |
 | Container image storage | 50GB per account | limits | One image, pinned versions. |
 | R2 multipart | parts 5MiB-5GiB, max 10,000 parts, object max 5TiB | [R2 limits](https://developers.cloudflare.com/r2/platform/limits/) | Part size is a config value, default 32MiB (needed to stay under the 256MB local memory test). 32MiB x 10,000 parts = 320,000MiB (about 312GiB, 335GB) per dump. That is far above the largest database today (about 1GB, planned for 3 years). A larger database needs a larger part size. |
@@ -406,7 +411,7 @@ The estimate is rough and uses assumed run times. Real numbers come after the ph
 ## 10. Risks and open questions
 
 Risks:
-1. Container-to-tunnel path depends on `cloudflared access tcp` with service-token flags that are not in the docs. Mitigated by the phase 4 spike.
+1. Container-to-tunnel path depends on `cloudflared access tcp` with a service token. The Phase 4 spike result is recorded in section 7.
 2. Containers are in beta, and limits or API may change. Pin versions; recheck docs per phase.
 3. No documented hard max runtime for containers. Very long dumps could be cut by deploy rollouts.
 4. R2 S3 credentials live inside the container for the job duration. Scope the token to one bucket; rotate on schedule.
