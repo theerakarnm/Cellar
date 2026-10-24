@@ -7,6 +7,7 @@ export const MAX_CONCURRENT_JOBS_LIMIT = 10;
 /** Known settings keys and their validators. Later phases add keys here. */
 export const settingValidators = {
   max_concurrent_jobs: z.number().int().min(1).max(MAX_CONCURRENT_JOBS_LIMIT),
+  download_url_ttl_seconds: z.number().int().min(1).max(900),
   retention_dry_run: z.boolean(),
 } as const;
 
