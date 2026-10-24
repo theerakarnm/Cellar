@@ -150,3 +150,23 @@ The notify hook is not idempotent per backup id (all call sites gate on the appl
 Staleness runs inside the cron after runCronTick steps (each step is wrapped).
 Owner action: set APP_BASE_URL for the deployed Worker, create channels, and send a test message from the UI or POST /api/alert-channels/:id/test to confirm real delivery.
 
+## Phase 9 - React UI
+Tasks done: 18 plan tasks plus 8 fix tasks (haiku and glm).
+Sonnet review rounds: 1 (no blockers).
+Opus verdict: round 1 FAIL (1 blocker), round 2 FAIL (1 blocker), round 3 PASS (0 blockers, 5 minors).
+Blockers fixed: a backup Delete button that the plan excludes was removed from the UI.
+A global text-wrap rule squeezed tables between 641 and 900 px (words broke mid-word).
+Wrapping is now scoped to name and error cells, tables scroll or become stacked cards up to 900 px.
+Verified in a real browser (playwright, Chromium) against local D1 with seeded data: 185 checks at 375, 768, 900, 1024 and 1440 px (no horizontal overflow, no mid-word breaks, red rows for failing and stale targets, restore dialog gating, masked secrets, double click sends one request, polling stops on close, catch-all route, network-down message).
+Opus attack checks: no secret in the DOM, network, console or storage; HTML in names renders as text; restore needs the exact typed name and the overwrite acknowledgement.
+Deviations: the UI shows no way to delete a backup (the plan excludes it).
+Dev servers run with wrangler dev --local --enable-containers=false because Docker is not installed (bun run dev needs Docker for the Phase 5 container).
+No jsdom or Testing Library, pure logic tests only (68 UI tests).
+Deferred MINOR items: connection label can break inside the port on the Targets list with a very long name at 1024 and 1440.
+Download and Restore buttons are not flush right when the table has spare width.
+Chrome logs a verbose Multiple forms DOM hint (won't fix).
+Rolldown use client warning from react-router in the build.
+bun run dev cannot start without Docker.
+AuditLog loadMore does not cancel when the filter changes mid-flight.
+Zone label GMT+0 is shown for UTC.
+Owner action: run bun run dev with Docker once to check the container path, and look at the screenshots in the browser for taste.
