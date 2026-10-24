@@ -143,7 +143,7 @@ Indexes: `idx_targets_next_run (enabled, next_run_at) WHERE deleted_at IS NULL`;
 | started_at, finished_at | text | |
 | heartbeat_at | text | updated by progress callbacks |
 | expires_at | text | informational, from last retention run |
-| deleted_at | text | soft delete after R2 object removed |
+| deleted_at | text | soft delete after the R2 object is removed; used by retention and by DELETE /api/backups/:id. `status` is never changed by deletion (there is no `deleted` status) |
 | deleted_reason | text | e.g. `retention`, `manual` |
 | last_seq | integer NOT NULL DEFAULT 0 | highest callback `seq` applied; replays are ignored |
 
@@ -224,7 +224,7 @@ Indexes: `(at DESC)`, `(entity_type, entity_id, at DESC)`.
 | value | text NOT NULL | JSON |
 | updated_at | text NOT NULL | |
 
-Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (max 900), `max_concurrent_jobs` (default 1, 1 to 10; counts backups only), `retention_dry_run` (default `true` until the owner turns it off).
+Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (max 900), `max_concurrent_jobs` (default 1, 1 to 10; counts backups only), `retention_dry_run` (JSON boolean, default `true` until the owner turns it off; only `false` turns it off), `retention_last_run` (internal, never writable through the API: `{ "date": "YYYY-MM-DD", "dryRun": boolean }`, the local date in `default_timezone` of the last completed daily retention run).
 
 ## 4. API routes
 
@@ -249,8 +249,8 @@ Secrets are write-only: responses show `connection: { host, port, dbName, user }
 | POST /api/backups/:id/download-url | - | `{ url, expiresAt }` presigned R2 GET |
 | POST /api/backups/:id/restore | `{ destinationTargetId, confirmName, acknowledgeOverwrite?: boolean }` | `202 { restoreId, sameDatabase }`. No default destination. `confirmName` must equal the destination target name (always required). When the destination is the source target, `acknowledgeOverwrite: true` is also required (400 otherwise). The destination must have a restore URL (400 otherwise). `409` if the destination has an active backup or restore. Never creates databases in v1. |
 | GET /api/restores, GET /api/restores/:id | `?targetId&limit&cursor` | `{ items: Restore[], nextCursor }` / `Restore` |
-| DELETE /api/backups/:id | `{ confirm: true }` | `204`. Success backups only. Refuses the latest success. Ignores retention dry run (explicit human action). Deletes R2 object first, then soft-deletes in D1, then writes an audit entry. |
-| GET /api/targets/:id/retention-preview | - | `{ keep: id[], delete: id[], reasons }` no side effects |
+| DELETE /api/backups/:id | `{ confirm: true }` | `204`. Success backups only. Refuses the latest success. Ignores retention dry run (explicit human action). Deletes R2 object first, then soft-deletes in D1 (`deleted_reason = 'manual'`), then writes audit entry `backup.delete`. Errors: `409` for the latest success or a non-success backup, `502 r2_delete_failed` if R2 fails (nothing changes). |
+| GET /api/targets/:id/retention-preview | - | `{ dryRun, keep: id[], delete: { id, startedAt, sizeBytes, reason }[], reasons }`. No side effects. `reasons` covers kept backups; each deletion has `reason: "no_rule_keeps_it"`. |
 | GET /api/alert-channels, POST, PATCH /:id, DELETE /:id | channel body (credentials write-only) | channel |
 | POST /api/alert-channels/:id/test | - | `{ ok }` |
 | GET /api/settings, PUT /api/settings | partial object, known keys only (400 otherwise); audit `settings.update` | settings object |
@@ -348,6 +348,7 @@ Rules:
 - Staleness: a target is stale when it has no successful backup within `stale_after_hours`. Default = expected interval of `schedule_cron` + 2h (daily = 26h). The per-target `stale_after_hours` overrides it.
 - On `failed` or `timed_out`, fire `backup_failed` alerts and never delete anything.
 - Orphan multipart uploads are aborted on failure. The R2 default lifecycle also aborts incomplete uploads after 7 days.
+- Retention: after a successful backup callback and once per local day from the cron, `runRetention` soft-deletes expired `success` backups (R2 object first) and skips soft-deleted targets. `retention_dry_run` (default `true`) logs decisions and deletes nothing.
 
 ## 7. Tunnel from Container: chosen approach
 
@@ -398,7 +399,7 @@ Values come from [research-notes.md](./research-notes.md). Re-check before each 
 | Queues | batch default 10 (max 100), msg 128KB, retries default 3, DLQ per consumer | [queues limits](https://developers.cloudflare.com/queues/platform/limits/), [retries](https://developers.cloudflare.com/queues/configuration/batching-retries/) | `max_batch_size: 1`, small messages (ids only). Container work is long, so do not hold the queue handler open: consumer starts the job and returns, and the callback finishes it. `max_retries` is 100 (the maximum) because a claim refused by the concurrency limit is retried every 30 seconds; the sweeper fails rows queued over 1 hour. |
 | Cron | UTC only; 5/account Free, 250 Paid; up to 15 min config propagation | [cron](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | One cron `* * * * *` does everything. Per-target cron and timezone are computed in code into `next_run_at` (UTC). |
 | D1 | 10GB per DB, 100 bound params, 30s per query, 2MB row | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) | Chunk `IN (...)` lists in retention to under 100 params. Prune audit logs if needed. |
-| Workers | CPU and subrequest limits per invocation | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) | Retention runner handles a bounded number of deletes per tick. |
+| Workers | CPU and subrequest limits per invocation | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) | Retention runner deletes at most 50 backups per run (per call and per cron tick). A daily run with more work records its day only when finished, so the next minute's tick continues it. |
 | Access JWT keys | rotate about every 6 weeks, old key valid 7 days | [validating JSON](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) | Cache JWKS with a short TTL; refetch on unknown `kid`. |
 
 Large-database mitigations:
