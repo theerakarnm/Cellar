@@ -15,6 +15,13 @@
       "when": 1792824055578,
       "tag": "0001_jobs-orchestration",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792863416208,
+      "tag": "0002_restore_last_seq",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,2 @@
+ALTER TABLE `restores` ADD `last_seq` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_restores_active_destination` ON `restores` (`destination_target_id`) WHERE "restores"."status" IN ('queued', 'running');

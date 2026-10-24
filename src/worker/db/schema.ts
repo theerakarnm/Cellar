@@ -126,11 +126,15 @@ export const restores = sqliteTable(
     startedAt: text("started_at"),
     finishedAt: text("finished_at"),
     heartbeatAt: text("heartbeat_at"),
+    lastSeq: integer("last_seq").notNull().default(0),
   },
   (t) => [
     index("idx_restores_destination").on(t.destinationTargetId, sql`${t.queuedAt} DESC`),
     index("idx_restores_source").on(t.sourceBackupId),
     index("idx_restores_status").on(t.status, t.heartbeatAt),
+    uniqueIndex("uq_restores_active_destination")
+      .on(t.destinationTargetId)
+      .where(sql`${t.status} IN ('queued', 'running')`),
   ],
 );
 
