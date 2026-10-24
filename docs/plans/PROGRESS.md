@@ -33,3 +33,17 @@ Deferred MINOR items:
 - Some validation messages echo submitted values (cron, channel ids).
 - uuidv7 is not monotonic within the same millisecond, so audit order can tie.
 - Name-unique race, see first item.
+
+## Phase 3 - GFS Retention Function
+
+Tasks done: 5 (haiku: 1, glm: 4).
+Sonnet review rounds: 1 (no blockers).
+Opus verdict: PASS (round 1).
+
+Deferred MINOR items:
+- An invalid now with max_age_days set gives NaN, so everything except the latest is deleted with no error.
+Suggest throwing RangeError.
+- The plain-object reasons map breaks on ids like toString or __proto__ (cannot happen with UUIDv7).
+- Phase 6 note: started_at is nullable, new Date(null) is 1970, and a non-Z SQLite datetime parses in host-local time.
+The Phase 6 mapper must pass ISO-Z strings.
+- Comparator tiebreak on duplicate ids (harmless).
