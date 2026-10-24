@@ -106,3 +106,28 @@ Stale comment in jobs/cron.ts.
 target-jobs.ts listing sorts by a raw coalesce string (display only).
 Owner action at deploy: retention deletes nothing until retention_dry_run is set to false.
 
+## Phase 7 - Restore and download
+Tasks done: 12 plan tasks plus 8 fix tasks (haiku and glm).
+Sonnet review rounds: 2 (no blockers).
+Opus verdict: round 1 FAIL (1 blocker), round 2 PASS.
+Round 1 blocker: a duplicate queue delivery of a restore killed the running container.
+Fixed by claiming the restore row (queued to running) atomically before startJob.
+A redelivery now acks without starting or stopping anything.
+Opus verified duplicates, 3 concurrent deliveries and a lost started callback with its own scratch tests.
+Other fixes: a backup claim is blocked while a restore into the same target is queued or running (owner answer 20, reverse direction).
+deleteBackup refuses (409 backup_in_use) and retention skips a backup that a queued or running restore uses as its source, listed in RetentionResult.skipped.
+acknowledgeOverwrite false is accepted for another target.
+Error codes with digits are preserved.
+Five restore-callback tests removed by a fix were restored.
+Download URLs: SigV4 presigned, TTL at most 900 seconds, Cache-Control no-store, URL never logged or audited.
+Opus checked the signature against botocore (30/30) and a live RustFS run (200, 403 when tampered, 403 after expiry).
+Deviations: ApiError import path is lib/api-error.ts.
+Docker is not installed, so the restore end-to-end through a real container was not run in this phase (it passed in Phase 4 on PG14 and PG17 under podman).
+Deferred MINOR items: restore start double fault (start RPC fails after the container started and stopJob also fails) can let a retry stop a live container.
+Terminal callbacks still apply to queued rows, so a late failed from a stopped first container could turn a retryable start into a final failure (suggest accepting succeeded and failed on running only).
+Deleting a target with an active restore into it returns 204.
+A backup requested during a restore waits and can fail with queue_timeout plus an alert.
+Restore busy check is not atomic (tiny window).
+Sweeper code TIMEOUT differs from the backup codes.
+Plan doc gotcha lines 1323 and 1354 are stale.
+
