@@ -27,7 +27,8 @@ describe("process helpers", () => {
 
   it("terminates a running child on abort", async () => {
     const controller = new AbortController();
-    const child = startChild(node, ["-e", "setInterval(() => {}, 1000)"], { env: childEnv({}), signal: controller.signal });
+    // Long grace: slow SIGTERM delivery under load must not escalate to SIGKILL and corrupt the expected signal.
+    const child = startChild(node, ["-e", "setInterval(() => {}, 1000)"], { env: childEnv({}), signal: controller.signal, killGraceMs: 10_000 });
     controller.abort();
     expect((await child.exit).signal).toBe("SIGTERM");
   });

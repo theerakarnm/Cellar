@@ -16,6 +16,12 @@ async function freePort(): Promise<number> {
 const input = (localPort: number) => ({ hostname: "db.example.com", tokenId: "tid-12345", tokenSecret: "tsecret-6789", localPort });
 const scrub = createScrubber(["tid-12345", "tsecret-6789"]);
 
+/** A port below the ephemeral range: the kernel never allocates it and no test listens on it, so it stays closed under any load. */
+const closedPort = 1;
+
+/** Generous budget for waits that depend on a real node child spawning. Readiness and exit are polled, so the happy path returns in milliseconds; only a broken or hopelessly overloaded spawn waits this out. */
+const spawnBudgetMs = 20_000;
+
 /** Runs `script` with node in place of cloudflared and records what the tunnel passed to it. */
 function fakeCloudflared(script: string) {
   const calls: { command: string; args: string[]; options: StartOptions }[] = [];
@@ -36,7 +42,7 @@ describe("waitForPort", () => {
   });
 
   it("rejects on timeout", async () => {
-    await expect(waitForPort(await freePort(), { timeoutMs: 200, intervalMs: 50 })).rejects.toThrow("did not open within 200 ms");
+    await expect(waitForPort(closedPort, { timeoutMs: 200, intervalMs: 50 })).rejects.toThrow("did not open within 200 ms");
   });
 
   it("stops early when failFast returns an error", async () => {
@@ -50,7 +56,7 @@ describe("startTunnel", () => {
   it("passes the token in env only, and is ready when the local port accepts connections", async () => {
     const port = await freePort();
     const fake = fakeCloudflared(`require('net').createServer().listen(${port}, '127.0.0.1'); setInterval(() => {}, 1000)`);
-    const tunnel = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 5000 });
+    const tunnel = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: spawnBudgetMs });
     const call = fake.calls[0];
     expect(call?.command).toBe("cloudflared");
     expect(call?.args).toEqual(["access", "tcp", "--hostname", "db.example.com", "--url", `127.0.0.1:${port}`, "--loglevel", "info"]);
@@ -62,7 +68,7 @@ describe("startTunnel", () => {
   it("fails fast with TUNNEL_FAILED and a scrubbed log when cloudflared exits", async () => {
     const port = await freePort();
     const fake = fakeCloudflared(`console.error('ERR failed to connect with tsecret-6789'); process.exitCode = 1`);
-    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 5000 }).catch((caught: unknown) => caught);
+    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: spawnBudgetMs }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(JobError);
     expect((error as JobError).code).toBe("TUNNEL_FAILED");
     expect((error as JobError).message).toContain("cloudflared exited with code 1");
@@ -72,21 +78,20 @@ describe("startTunnel", () => {
   it("reports AUTH_FAILED when the log shows the token was refused", async () => {
     const port = await freePort();
     const fake = fakeCloudflared(`console.error('failed to connect to origin: 403 Forbidden'); process.exitCode = 1`);
-    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 5000 }).catch((caught: unknown) => caught);
+    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: spawnBudgetMs }).catch((caught: unknown) => caught);
     expect((error as JobError).code).toBe("AUTH_FAILED");
   });
 
   it("reports AUTH_FAILED for a 401 or forbidden refusal in the cloudflared log", async () => {
     const port = await freePort();
     const fake = fakeCloudflared(`console.error('error: 401 unauthorized'); process.exitCode = 1`);
-    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 5000 }).catch((caught: unknown) => caught);
+    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: spawnBudgetMs }).catch((caught: unknown) => caught);
     expect((error as JobError).code).toBe("AUTH_FAILED");
   });
 
   it("times out, kills the process, and reports TUNNEL_FAILED when the port never opens", async () => {
-    const port = await freePort();
     const fake = fakeCloudflared(`setInterval(() => {}, 1000)`);
-    const error = await startTunnel(input(port), { scrub, start: fake.start, readyTimeoutMs: 300 }).catch((caught: unknown) => caught);
+    const error = await startTunnel(input(closedPort), { scrub, start: fake.start, readyTimeoutMs: 300 }).catch((caught: unknown) => caught);
     expect((error as JobError).code).toBe("TUNNEL_FAILED");
     expect((error as JobError).message).toContain("did not open");
   });
