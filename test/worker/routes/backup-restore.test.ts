@@ -128,6 +128,19 @@ describe("POST /api/backups/:id/restore", () => {
     expect(((await res.json()) as { sameDatabase: boolean }).sameDatabase).toBe(false);
   });
 
+  it("accepts acknowledgeOverwrite: false for another target, and rejects non-boolean values", async () => {
+    const { destination, backup } = await setup();
+    for (const bad of [{ acknowledgeOverwrite: "true" }, { acknowledgeOverwrite: 1 }, { acknowledgeOverwrite: null }]) {
+      const res = await restore(backup.id, { destinationTargetId: destination.id, confirmName: "scratch-db", ...bad });
+      expect(res.status).toBe(400);
+      expect(await errorCode(res)).toBe("validation_error");
+    }
+    expect(await allRestores()).toHaveLength(0);
+    const res = await restore(backup.id, { destinationTargetId: destination.id, confirmName: "scratch-db", acknowledgeOverwrite: false });
+    expect(res.status).toBe(202);
+    expect(((await res.json()) as { sameDatabase: boolean }).sameDatabase).toBe(false);
+  });
+
   it("writes a restore.start audit row that holds no connection secrets", async () => {
     const { destination, backup } = await setup();
     const res = await restore(backup.id, { destinationTargetId: destination.id, confirmName: "scratch-db" });

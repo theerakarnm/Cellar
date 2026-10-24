@@ -37,7 +37,7 @@ async function readDownloadTtlSeconds(db: Db): Promise<number> {
 const restoreBody = z.strictObject({
   destinationTargetId: z.string().min(1),
   confirmName: z.string(),
-  acknowledgeOverwrite: z.literal(true).optional(),
+  acknowledgeOverwrite: z.boolean().optional(),
 });
 
 async function destinationBusy(db: Db, targetId: string): Promise<boolean> {
