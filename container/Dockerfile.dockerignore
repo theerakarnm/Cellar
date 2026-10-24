@@ -1,0 +1,7 @@
+# Applies to container/Dockerfile (BuildKit reads <Dockerfile>.dockerignore). Send only what the image copies.
+*
+!container/
+container/test/
+container/e2e/
+container/tsconfig.json
+!src/worker/lib/redact.ts
