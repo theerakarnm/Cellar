@@ -22,7 +22,7 @@ const callbackSchema = z.object({
       durationMs: z.number().int().min(0).optional(),
       partCount: z.number().int().min(0).optional(),
       dbSizeBytes: z.number().int().min(0).optional(),
-      hasReadAllData: z.boolean().optional(),
+      hasReadAllData: z.boolean().nullable().optional(),
     })
     .optional(),
   error: z.object({ code: z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/), message: z.string().max(4000) }).optional(),

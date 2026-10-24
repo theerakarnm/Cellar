@@ -169,6 +169,20 @@ describe("handleCallback - connection tests", () => {
     expect(JSON.parse((await testRow())?.resultJson ?? "{}")).toEqual({ pgServerVersion: "16.3", dbSizeBytes: 8192, hasReadAllData: true });
   });
 
+  it("accepts the PG13 success result, where hasReadAllData is null because the role does not exist", async () => {
+    const pg13Result = { pgServerVersion: "13.16", dbSizeBytes: 1000, hasReadAllData: null, durationMs: 50 };
+    const outcome = await post(event("c1", "succeeded", 1, { result: pg13Result }));
+    expect(outcome).toMatchObject({ applied: true, type: "test", targetId: "t1" });
+    expect(await testRow()).toMatchObject({ status: "success" });
+    expect(JSON.parse((await testRow())?.resultJson ?? "{}")).toEqual(pg13Result);
+  });
+
+  it("accepts a success result without hasReadAllData", async () => {
+    const outcome = await post(event("c1", "succeeded", 1, { result: { pgServerVersion: "13.16", dbSizeBytes: 1000, durationMs: 50 } }));
+    expect(outcome).toMatchObject({ applied: true, type: "test" });
+    expect(await testRow()).toMatchObject({ status: "success" });
+  });
+
   it("stores a redacted failure and leaves the target status alone", async () => {
     await post(event("c1", "failed", 1, { error: { code: "AUTH_FAILED", message: "password=hunter2 rejected" } }));
     const row = await testRow();
