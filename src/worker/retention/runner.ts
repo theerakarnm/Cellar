@@ -10,6 +10,8 @@ export const MAX_DELETIONS_PER_RUN = 50;
 export interface RetentionResult {
   deleted: string[];
   failed: { id: string; error: string }[];
+  /** Backups a guard refused without an error; currently only an active restore reading the dump. */
+  skipped: { id: string; reason: string }[];
   dryRun: boolean;
   /** Planned deletions not attempted because of `maxDeletions`. Always 0 in a dry run. */
   remaining: number;
@@ -22,7 +24,7 @@ export async function runRetention(
 ): Promise<RetentionResult> {
   const db = getDb(env);
   const dryRun = await getRetentionDryRun(env);
-  const result: RetentionResult = { deleted: [], failed: [], dryRun, remaining: 0 };
+  const result: RetentionResult = { deleted: [], failed: [], skipped: [], dryRun, remaining: 0 };
 
   const target = await loadActiveTarget(db, targetId);
   if (!target) return result;
@@ -51,6 +53,7 @@ export async function runRetention(
       const outcome = await deleteBackup(env, { id: backup.id, targetId, r2Key: backup.r2Key }, { reason: "retention", actor: "system" });
       if (outcome.status === "deleted") result.deleted.push(backup.id);
       else if (outcome.status === "refused_latest_success") result.failed.push({ id: backup.id, error: "refused_latest_success" });
+      else if (outcome.status === "refused_active_restore") result.skipped.push({ id: backup.id, reason: "active_restore" });
       else if (outcome.status === "r2_failed") result.failed.push({ id: backup.id, error: outcome.error });
     } catch (error) {
       result.failed.push({ id: backup.id, error: redactError(error) });

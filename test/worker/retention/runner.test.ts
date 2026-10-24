@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeSetting } from "../../../src/worker/retention/config";
 import { runRetention } from "../../../src/worker/retention/runner";
 import { createTestEnv } from "../../helpers/env";
+import { seedRestore } from "../../helpers/restore-fixtures";
 import {
   NOW,
   auditRows,
@@ -36,7 +37,7 @@ describe("runRetention", () => {
 
     const result = await runRetention(t.env, targetId, { now: NOW });
 
-    expect(result).toEqual({ deleted: [b4.id, b3.id, b2.id], failed: [], dryRun: false, remaining: 0 });
+    expect(result).toEqual({ deleted: [b4.id, b3.id, b2.id], failed: [], skipped: [], dryRun: false, remaining: 0 });
     for (const gone of [b4, b3, b2]) {
       expect(await hasObject(t.env, gone.r2Key)).toBe(false);
       const row = await backupRow(t.env, gone.id);
@@ -93,7 +94,7 @@ describe("runRetention", () => {
 
     const result = await runRetention(t.env, targetId, { now: NOW });
 
-    expect(result).toEqual({ deleted: [], failed: [], dryRun: true, remaining: 0 });
+    expect(result).toEqual({ deleted: [], failed: [], skipped: [], dryRun: true, remaining: 0 });
     expect(await hasObject(t.env, old.r2Key)).toBe(true);
     expect((await backupRow(t.env, old.id))?.deletedAt).toBeNull();
     expect(await auditRows(t.env)).toEqual([]);
@@ -137,5 +138,20 @@ describe("runRetention", () => {
 
     expect(result.deleted).toEqual([b3.id, b2.id]);
     expect(result.remaining).toBe(1);
+  });
+
+  it("reports a backup held by a running restore as skipped, not failed, and leaves it untouched", async () => {
+    await goLive();
+    const targetId = await seedTarget(t.env, { keepLast: 1 });
+    const held = await seedBackup(t.env, targetId, daysAgo(1));
+    await seedBackup(t.env, targetId, daysAgo(0));
+    await seedRestore(t.env, { sourceBackupId: held.id, destinationTargetId: targetId, status: "running" });
+
+    const result = await runRetention(t.env, targetId, { now: NOW });
+
+    expect(result).toEqual({ deleted: [], failed: [], skipped: [{ id: held.id, reason: "active_restore" }], dryRun: false, remaining: 0 });
+    expect(await hasObject(t.env, held.r2Key)).toBe(true);
+    expect((await backupRow(t.env, held.id))?.deletedAt).toBeNull();
+    expect(await auditRows(t.env)).toEqual([]);
   });
 });
