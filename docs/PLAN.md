@@ -60,12 +60,12 @@ cellar/
     env.ts                     Env type
     globals.d.ts               types ctx.exports for the JobRunner
     middleware/  access.ts  error.ts
-    routes/  targets.ts  target-jobs.ts  backup-actions.ts  backup-delete.ts  restores.ts  retention.ts  settings.ts  audit-logs.ts  internal.ts
+    routes/  targets.ts  target-jobs.ts  backup-actions.ts  backup-delete.ts  restores.ts  retention.ts  settings.ts  audit-logs.ts  alert-channels.ts  internal.ts
     db/  schema.ts  client.ts
     lib/  crypto.ts  redact.ts  r2-key.ts  job-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  settings.ts  restore-rules.ts  s3-presign.ts
     retention/  types.ts  gfs.ts  runner.ts
     jobs/  types.ts  state.ts  dispatch.ts  payload.ts  consumer.ts  runner-client.ts  callback.ts  sweeper.ts  restore-job.ts  restore-callback.ts  restore-sweeper.ts  cron.ts
-    alerts/  line.ts  discord.ts  staleness.ts
+    alerts/  message.ts  types.ts  line.ts  discord.ts  dispatch.ts  notify.ts  staleness.ts
     container/  job-runner.ts  (JobRunner Durable Object + CallbackEntrypoint, native ctx.container API)
   container/                   runner source; image built from the repo root with container/Dockerfile
     Dockerfile  Dockerfile.dockerignore  tsconfig.json  entrypoint.ts  job.ts  pg.ts  redact.ts  process.ts
@@ -77,7 +77,7 @@ cellar/
 
 Notes:
 - The container entrypoint is TypeScript and runs on Bun.
-- `src/shared/` (`tz.ts`, `cron.ts`, `pg-url.ts`, `target-schema.ts`) holds code used by both the Worker and the UI, with tests in `test/shared/`. `src/worker/services/` holds the D1 logic that routes call. `test/helpers/` holds the shared D1/R2/Queue test harness (`getPlatformProxy`).
+- `src/shared/` (`alerts.ts`, `tz.ts`, `cron.ts`, `pg-url.ts`, `target-schema.ts`) holds code used by both the Worker and the UI, with tests in `test/shared/`. `src/worker/services/` holds the D1 logic that routes call. `test/helpers/` holds the shared D1/R2/Queue test harness (`getPlatformProxy`).
 - Audit rows are written by `src/worker/lib/audit.ts` (a helper, not middleware). Services commit the audit insert in the same `db.batch` as the change.
 - Cron grammar is numeric 5-field (no names, no @macros). A wall time inside a DST gap runs just after the gap; a wall time that happens twice runs once.
 - `container/hmac.ts` is the single HMAC implementation (WebCrypto only). The Worker imports it by relative path.
@@ -113,7 +113,10 @@ Encrypted columns store `v1:<base64 iv>:<base64 ciphertext+tag>`. `ENCRYPTION_KE
 | keep_monthly | integer DEFAULT 6 | |
 | max_age_days | integer | default null (off) |
 | job_deadline_minutes | integer NOT NULL DEFAULT 120 | per-target job deadline |
-| stale_after_hours | integer | null = derived from schedule, see section 6 |
+| stale_after_hours | integer | null = derived from schedule: expected interval + 2h (daily = 26h) |
+| consecutive_failures | integer NOT NULL DEFAULT 0 | reset by a success |
+| failure_alerted_at | text | set when the N-in-a-row alert fired; cleared by a success |
+| stale_alerted_at | text | set when the stale alert fired; cleared by a success |
 | alert_failure_threshold | integer NOT NULL DEFAULT 3 | alert after N consecutive failures |
 | next_run_at | text | UTC, indexed; slot already enqueued is never re-enqueued |
 | last_backup_at | text | last success |
@@ -189,8 +192,8 @@ Indexes: unique `uq_connection_tests_active_target (target_id) WHERE status IN (
 | id | text PK | |
 | type | text NOT NULL | `line` or `discord` |
 | name | text NOT NULL | |
-| credential_enc | text NOT NULL | LINE token+to, or Discord webhook URL |
-| events | text NOT NULL | JSON array: `backup_failed`, `backup_stale`, `retention_failed`, `restore_finished` |
+| credential_enc | text NOT NULL | JSON encrypted as one string: LINE `{token, to}`, Discord `{webhookUrl}` |
+| events | text NOT NULL | JSON array: `backup_failed`, `backup_stale`, `backup_consecutive_failures`, `retention_failed`, `restore_finished` |
 | enabled | integer NOT NULL DEFAULT 1 | |
 | created_at, updated_at | text NOT NULL | |
 
@@ -233,7 +236,7 @@ Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 
 All routes sit under `/api`, require a valid Access JWT (except `GET /api/health`), and validate input with Zod.
 Errors: `{ "error": { "code": string, "message": string, "details"?: unknown } }` with redacted messages. Codes: `validation_error` (400, `details` is `{ path, message }[]`), `unauthorized` (401), `not_found` (404), `conflict` (409), `internal_error` (500).
 Lists use `?limit&cursor` and return `{ items, nextCursor }`.
-Secrets are write-only: responses show `connection: { host, port, dbName, user }`, `hasRestoreUrl`, and `hasTunnelToken`, never a URL, token, or `*_enc` value.
+Secrets are write-only: responses show `connection: { host, port, dbName, user }`, `hasRestoreUrl`, and `hasTunnelToken`, never a URL, token, or `*_enc` value. Alert channel responses show `hasCredential: true` and never a credential.
 R2_REGION (optional env var) sets the SigV4 region for presigned URLs; R2 uses "auto", local RustFS needs us-east-1.
 
 | Method + path | Request | Response |
@@ -254,12 +257,17 @@ R2_REGION (optional env var) sets the SigV4 region for presigned URLs; R2 uses "
 | GET /api/restores, GET /api/restores/:id | `?targetId&limit&cursor` | `{ items: Restore[], nextCursor }` / `Restore` |
 | DELETE /api/backups/:id | `{ confirm: true }` | `204`. Success backups only. Refuses the latest success. Ignores retention dry run (explicit human action). Deletes R2 object first, then soft-deletes in D1 (`deleted_reason = 'manual'`), then writes audit entry `backup.delete`. Errors: `409` for the latest success or a non-success backup, `409 backup_in_use` while a queued or running restore uses the backup as its source, `502 r2_delete_failed` if R2 fails (nothing changes). |
 | GET /api/targets/:id/retention-preview | - | `{ dryRun, keep: id[], delete: { id, startedAt, sizeBytes, reason }[], reasons }`. No side effects. `reasons` covers kept backups; each deletion has `reason: "no_rule_keeps_it"`. |
-| GET /api/alert-channels, POST, PATCH /:id, DELETE /:id | channel body (credentials write-only) | channel |
-| POST /api/alert-channels/:id/test | - | `{ ok }` |
+| GET /api/alert-channels | `?limit&cursor` | `{ items, nextCursor }` |
+| POST /api/alert-channels | `{ type, name, credential, events?, enabled? }` (credentials write-only; `events` defaults to `backup_failed`, `backup_stale`, `backup_consecutive_failures`) | `201 Channel` |
+| PATCH /api/alert-channels/:id | partial of POST body; a supplied `credential` must match the stored channel type | `Channel` |
+| DELETE /api/alert-channels/:id | - | `204`, hard delete with its `target_alert_channels` link rows |
+| POST /api/alert-channels/:id/test | - | `200 { ok: true }`, or `{ ok: false, error }` when the test send failed |
 | GET /api/settings, PUT /api/settings | partial object, known keys only (400 otherwise); audit `settings.update` | settings object |
 | GET /api/audit-logs | `?entityType&entityId&limit&cursor` | `{ items, nextCursor }` |
 | GET /api/health | - | `{ ok, version }` (unauthenticated; nothing about targets or config; every other `/api` route requires Access) |
 | POST /internal/jobs/callback | signed payload (jobId in body), see section 5 | `200`. Reached through the JobRunner outbound intercept of `http://cellar-callback.internal` (Spike result: INCONCLUSIVE - the outbound intercept is unverified locally; confirm with Docker Desktop or on a deployed Worker); with FALLBACK it is the public URL with an Access bypass for this exact path. |
+
+Alert thresholds: `alert_failure_threshold` and `stale_after_hours` are edited through target create/update (Phase 2); there is no alert-settings endpoint.
 
 `Target` fields: id, name, projectTag, dbName, connection (`{ host, port, dbName, user }`), hasRestoreUrl, hasTunnelToken, tunnelHostname, scheduleCron, timezone, enabled, retention, jobDeadlineMinutes, staleAfterHours, alertFailureThreshold, nextRunAt, lastBackupAt, lastStatus, alertChannelIds, stats (`{ backupCount, totalBackupBytes }`, counting only non-deleted success backups), createdAt, updatedAt.
 
@@ -348,8 +356,7 @@ Rules:
 - A target has at most one `queued` or `running` backup and one `queued` or `running` test (partial unique indexes). Cron catch-up: after enqueuing a slot, `next_run_at` becomes the next run after the slot, or after now if that is already past; an active backup defers the slot to the next tick.
 - The same rules apply to `connection_tests` (5 minute deadline) and to `restores`. For restores the deadline is `started_at` plus the destination target's `job_deadline_minutes`.
 - Concurrency: `max_instances` is 2 (configurable). `max_concurrent_jobs` counts scheduled and manual backups only and defaults to `max_instances` - 1, so one instance stays free for a restore or a test connection. Restores never count toward `max_concurrent_jobs`.
-- Staleness: a target is stale when it has no successful backup within `stale_after_hours`. Default = expected interval of `schedule_cron` + 2h (daily = 26h). The per-target `stale_after_hours` overrides it.
-- On `failed` or `timed_out`, fire `backup_failed` alerts and never delete anything.
+- On `failed` or `timed_out`, send `backup_failed` every time. When `consecutive_failures` reaches `alert_failure_threshold`, send `backup_consecutive_failures` once until a success. Staleness is checked in the per-minute cron and sent once per stale episode (`stale_alerted_at`); a success resets both episodes. Reference time is `last_backup_at`, else `created_at`. Alert failures are logged and never fail the backup flow.
 - Orphan multipart uploads are aborted on failure. The R2 default lifecycle also aborts incomplete uploads after 7 days.
 - Retention: after a successful backup callback and once per local day from the cron, `runRetention` soft-deletes expired `success` backups (R2 object first) and skips soft-deleted targets. It also skips a backup that a queued or running restore is reading as its source. `retention_dry_run` (default `true`) logs decisions and deletes nothing.
 
@@ -444,10 +451,11 @@ Risks:
 3. No documented hard max runtime for containers. Very long dumps could be cut by deploy rollouts.
 4. R2 S3 credentials live inside the container for the job duration. Scope the token to one bucket; rotate on schedule.
 5. A restore is destructive on the target DB. Needs the typed target name, an extra acknowledgement for the source database, and an audit log row.
-9. 32MiB parts cap a single dump at about 335GB. Fine for today (1GB), but a much larger database needs a larger part size.
-6. Dump versions: `pg_dump` must be at least the server major version. Pick the binary by detected server version.
-7. Clock and timezone logic (DST) in schedule evaluation. Asia/Bangkok has no DST, other zones do.
-8. Access JWT misconfiguration (wrong `aud`) would block all users or let all in. Needs tests.
+6. 32MiB parts cap a single dump at about 335GB. Fine for today (1GB), but a much larger database needs a larger part size.
+7. Dump versions: `pg_dump` must be at least the server major version. Pick the binary by detected server version.
+8. Clock and timezone logic (DST) in schedule evaluation. Asia/Bangkok has no DST, other zones do.
+9. Access JWT misconfiguration (wrong `aud`) would block all users or let all in. Needs tests.
+10. LINE push messages count against the Official Account's monthly quota [uncertain]. Alerts send one message per event per channel.
 
 Open questions for the owner: none. Items closed: cost ceiling ($10/month), restore without `pg_restore -j`, manual delete confirmed by `{ confirm: true }`, direct mode removed, name reuse after soft delete.
 
