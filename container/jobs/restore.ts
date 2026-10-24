@@ -1,22 +1,35 @@
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { JobError } from "../job";
+import { JobError, type Job } from "../job";
 import { assertSupportedMajor, pgBinary, pgEnv } from "../pg";
 import { childEnv, startChild } from "../process";
 import { S3Error } from "../s3";
 import { connectionFor, probeServer, s3For, toolFailure, type JobContext } from "./context";
+import type { PgConnection } from "../pg";
+
+/**
+ * The restore destination is the database named in db.url. pg_restore --clean drops objects there,
+ * so the job must name the same database in restore.targetDbName. A mismatch fails before any connection.
+ */
+export function restoreConnection(job: Job): PgConnection {
+  if (!job.restore) throw new JobError("INVALID_JOB", "Invalid job: restore is required");
+  const connection = connectionFor(job);
+  if (job.restore.targetDbName !== connection.database) {
+    throw new JobError("INVALID_JOB", "Invalid job: restore.targetDbName does not match the database in db.url");
+  }
+  return connection;
+}
 
 /**
  * Streams the dump from R2 into the pg_restore matching the destination server's major. A newer
- * pg_restore sends SQL (for example transaction_timeout) that older servers reject. The destination
- * is the database named in the job's connection URL.
+ * pg_restore sends SQL (for example transaction_timeout) that older servers reject.
  */
 export async function runRestore(ctx: JobContext): Promise<Record<string, unknown>> {
   const { job, signal } = ctx;
   if (!job.restore) throw new JobError("INVALID_JOB", "Invalid job: restore is required");
   const startedAt = Date.now();
-  const connection = connectionFor(job);
+  const connection = restoreConnection(job);
 
   const probe = await probeServer(ctx, connection);
   assertSupportedMajor(probe.major, "RESTORE_FAILED");
