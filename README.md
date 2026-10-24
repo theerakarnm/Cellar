@@ -208,63 +208,23 @@ You do not need an Access bypass for it.
 ## Connecting a database (per VM)
 
 Do this once for each VM that hosts a database.
+The full guide is [docs/vm-onboarding.md](docs/vm-onboarding.md).
+Cellar reaches Postgres only through Cloudflare Tunnel.
 
-### 1. Create a tunnel
+1. **Tunnel.** Add `cloudflared` to the VM's docker-compose stack and create a public TCP hostname for Postgres.
+   Postgres needs no published port.
+2. **Access.** Protect that hostname with an Access application that allows only a Cellar **service token**.
+3. **Backup role.** Create a read-only role.
+   The guide has the SQL for PostgreSQL 14 and newer (`pg_read_all_data`) and for PostgreSQL 13 (explicit grants).
+4. **Restore role.** Prepare a role that can drop and create objects in the destination database.
+   Cellar needs this as a separate restore URL.
+5. **Register it.** In the dashboard, select **Add database** and fill in the connection details, schedule, retention, and alert channels.
+   The dashboard saves a new database as disabled.
+   Save it, select **Test connection** on its page, and enable it when the test passes.
 
-In Zero Trust, go to **Networks > Tunnels**, create a tunnel, and copy its token. Add a public hostname of type **TCP** (for example `db-shop.example.com`) pointing to `postgres:5432`, and protect it with an Access application that allows a **service token**.
-
-### 2. Add `cloudflared` to the app's docker-compose
-
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    # no "ports:" section needed, keep Postgres private
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    restart: unless-stopped
-    depends_on:
-      - postgres
-
-volumes:
-  pgdata:
-```
-
-```bash
-docker compose up -d cloudflared
-```
-
-### 3. Create a dedicated backup role
-
-Run this inside the database (PostgreSQL 14+):
-
-```sql
-CREATE ROLE cellar_backup WITH LOGIN PASSWORD 'use-a-strong-password';
-GRANT pg_read_all_data TO cellar_backup;
-```
-
-For PostgreSQL 13, grant `CONNECT`, `USAGE` on schemas, and `SELECT` on all tables and sequences instead.
-
-> The backup role is read only. Restoring requires a role that can create and drop objects in the target database, so Cellar asks for a restore-capable connection at restore time.
-
-### 4. Register it in Cellar
-
-In the dashboard, select **Add database** and fill in:
-
-- **Name** and optional **project tag**
-- **Connection URL**, e.g. `postgresql://cellar_backup:***@localhost:5432/shop`
-- **Connection mode**: `tunnel`, with the tunnel hostname and service token
-- **Schedule**, e.g. `0 2 * * *` (every day at 02:00) and timezone
-- **Retention policy**
-- **Alert channels**
-
-Click **Test connection**. Cellar shows the server version and database size if everything is reachable.
+> **To verify at first deploy.** The tunnel path has not been run against a real tunnel yet.
+> Cellar has been tested against local stand-ins only.
+> Run **Test connection** on one real database first.
 
 ## Retention (GFS)
 
@@ -272,82 +232,150 @@ Each database has its own policy:
 
 | Setting | Meaning |
 |---|---|
-| `keep_last` | Always keep the N most recent successful backups |
-| `daily` | Keep one backup per day for the last N days |
-| `weekly` | Keep one backup per week for the last N weeks |
-| `monthly` | Keep one backup per month for the last N months |
-| `max_age_days` | Optional hard limit, anything older is deleted |
+| `keep_last` | Keep the N newest successful backups |
+| `daily` | Keep the newest backup of each of the last N days that have a backup |
+| `weekly` | Keep the newest backup of each of the last N ISO weeks that have a backup (Monday start) |
+| `monthly` | Keep the newest backup of each of the last N calendar months that have a backup |
+| `max_age_days` | Optional. Backups older than this are not kept by any rule, except the latest successful backup |
 
-A backup is cellart if **any** rule wants to keep it. Everything else is deleted from R2 and marked `deleted` in D1 (the record stays for the audit trail).
+Days, weeks, and months are counted in the database's time zone.
+A rule that is empty or `0` is off.
+Failed and timed-out backups are never counted and never deleted by retention.
 
-Example: `keep_last=3, daily=7, weekly=4, monthly=6` keeps roughly 7 to 20 backups covering six months.
+A backup is kept if **any** rule keeps it.
+Everything else is deleted from R2 first, and then its D1 row is soft-deleted.
+The row stays for the audit trail.
 
-Retention runs after every successful backup and once a day. The target detail page shows a **retention preview** of what will be deleted next.
+Example: `keep_last=3, daily=7, weekly=4, monthly=6` with one backup per day keeps 14 backups once there are about five months of backups.
+It keeps 10 with one month of backups and 13 with four months.
+
+Retention runs after every successful backup and once a day.
+Each run deletes at most 50 backups.
+The target page shows a **retention preview** of what the next run would delete.
+
+> **Dry run is on by default.**
+> Until you turn it off in **Settings**, retention only logs what it would delete and deletes nothing.
+> Check the retention preview first.
 
 **Safety rule:** the most recent successful backup of a database is never deleted, regardless of policy.
 
 ## Restoring a backup
 
 1. Open the database, choose a backup from the history, and select **Restore**.
-2. Choose the destination database (it must be registered in Cellar).
+2. Choose the destination database.
+   It must have a restore connection URL.
 3. Type the destination name to confirm.
+   This is always required.
+4. If the destination is the source database, also tick the overwrite acknowledgement.
+   Without it the API answers `400`.
 
-Cellar runs:
-
-```bash
-pg_restore --clean --if-exists --no-owner -d <destination> <backup>
-```
-
-> Restoring with `--clean` drops and recreates objects in the destination. Cellar shows an extra warning when you restore into the same database the backup came from. Test restores into a scratch database first.
-
-To restore manually, use **Download** to get a presigned link, then:
+Cellar has no default destination and never creates a database.
+The database name comes from the restore URL.
+It streams the dump from R2 into:
 
 ```bash
-pg_restore --clean --if-exists --no-owner -d "postgresql://..." backup.dump
+pg_restore --clean --if-exists --no-owner --no-password --dbname <destination>
 ```
+
+Cellar picks the `pg_restore` that matches the destination server's major version.
+
+> Restoring with `--clean` drops and recreates objects in the destination.
+> When the destination is the source database, the dialog asks you to confirm the overwrite.
+> A restore is rejected with `409` while the destination has a backup or a restore running.
+> Test restores into a scratch database first.
+
+To restore by hand, or to check a restore, follow [docs/restore-runbook.md](docs/restore-runbook.md).
 
 ## Alerts
 
-Configure channels under **Settings > Alert channels**:
+Configure channels under **Settings**, in the **Alert channels** section:
 
-- **LINE** - Messaging API channel access token and target user or group ID
-- **Discord** - webhook URL
+- **LINE** - Messaging API channel access token and the recipient ID (`to`), a user, group, or room
+- **Discord** - webhook URL.
+  It must start with `https://discord.com/api/webhooks/` or `https://discordapp.com/api/webhooks/`.
+  Other URLs are rejected.
 
-Alerts fire when:
+Link each database to the channels that should alert for it, on the database form.
+A channel can be linked to many databases, and a database can have many channels.
+A database with no linked channel sends no alerts.
 
-- a backup fails or times out
-- a database fails N times in a row
-- a database has no successful backup within X hours (staleness check)
+Alerts fire for these events:
 
+- `backup_failed` - a backup fails or times out.
+  Sent every time.
+- `backup_consecutive_failures` - a database fails N times in a row.
+  N is set per database (default 3).
+  Sent once, until a backup succeeds.
+- `backup_stale` - a database has no successful backup within its stale limit.
+  Sent once per stale period.
+
+The stale limit is the value of `stale after hours` on the database, when you set it.
+If you leave it empty, the limit is the expected gap between scheduled runs plus 2 hours.
+A daily schedule therefore goes stale after 26 hours.
+
+Each message names the database and its project tag, the event, a short redacted error, the time in the database's time zone, and a link to its page.
 Alert messages never include connection strings or passwords.
+
+> **Not tested yet.** Real LINE and Discord delivery has not been tested.
+> Send a test message from the channel settings before you rely on it.
 
 ## Security
 
-- **Authentication:** Cloudflare Access, with JWT signature, audience, and expiry checked on every request
-- **Network:** Postgres stays private behind Cloudflare Tunnel, no public ports
-- **Secrets at rest:** connection URLs, service tokens, and alert credentials are encrypted with AES-256-GCM before being stored in D1
-- **Secrets in transit:** plaintext values are never returned by the API after saving, and are redacted from logs, errors, and alerts
-- **Least privilege:** use a read-only role for backups and a separate, scoped R2 token for the bucket
-- **Downloads:** presigned URLs expire in 15 minutes or less, and every download is logged
-- **Container callbacks:** signed with HMAC so results cannot be forged
+- **Authentication:** Cloudflare Access.
+  The Worker checks the JWT signature, audience, and expiry on every `/api` request, except `GET /api/health`.
+- **Network:** Postgres stays private behind Cloudflare Tunnel, with no public ports.
+- **Secrets at rest:** connection URLs, service tokens, and alert credentials are encrypted with AES-256-GCM before they are stored in D1.
+- **Secrets in transit:** the API never returns a saved secret in plaintext.
+  Secrets are redacted from logs, errors, and alerts.
+- **Least privilege:** use a read-only role for backups and a separate, bucket-scoped R2 token.
+- **Downloads:** presigned URLs last at most 15 minutes and are sent with `Cache-Control: no-store`.
+  Each download is written to the audit log, without the URL.
+- **Container callbacks:** each job has its own key, derived from `ENCRYPTION_KEY`.
+  Callbacks are signed with HMAC-SHA256 and must arrive within 5 minutes.
+  Each callback carries a sequence number, so an old result cannot replace a newer one.
 
-Found a vulnerability? Please do not open a public issue. See [SECURITY.md](SECURITY.md).
+Found a vulnerability?
+Please do not open a public issue.
+See [SECURITY.md](SECURITY.md).
 
 ## Limits and considerations
 
-- Backup speed depends on the Tunnel and the container's network throughput. Very large databases (hundreds of GB) may hit container runtime limits. Check the current [Cloudflare Containers limits](https://developers.cloudflare.com/containers/) for your plan.
-- Cellar makes logical backups with `pg_dump`. It does not do point-in-time recovery (PITR) or WAL archiving. For that, look at tools like pgBackRest or WAL-G.
-- R2 storage is billed by Cloudflare. Retention policies directly control your storage cost, and the dashboard shows total size per database.
+- Backup speed depends on the Tunnel and the container's network throughput.
+  Very large databases (hundreds of GB) may hit container runtime limits.
+  Check the current [Cloudflare Containers limits](https://developers.cloudflare.com/containers/) for your plan.
+- Cellar makes logical backups with `pg_dump`.
+  It does not do point-in-time recovery (PITR) or WAL archiving.
+  For that, look at tools like pgBackRest or WAL-G.
+- R2 storage is billed by Cloudflare.
+  Retention policies directly control your storage cost.
+  The dashboard shows the total backup size and the size of each database.
+- Backups are uploaded in multipart parts of 32 MiB by default.
+  R2 allows at most 10,000 parts per upload, so Cellar uses larger parts for a large database.
+  A part is at most 128 MiB, so one dump can be up to about 1.2 TiB.
+- Add an R2 bucket lifecycle rule that aborts incomplete multipart uploads after 1 day.
+  Cellar does not create this rule for you.
+  See the Cloudflare docs on [R2 object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
+- At most 2 containers run at once (`max_instances` in `wrangler.jsonc`).
+  Backups run at most `max_concurrent_jobs` at a time.
+  This is a global setting, 1 by default, up to 10.
+  Restores and connection tests do not count toward it, so one container stays free for them.
+- Every new database uses the schedule `0 2 * * *` (02:00) by default.
+  With one backup at a time, give databases different schedules, or raise `max_concurrent_jobs`.
 
 ## Development
 
 ```bash
 bun install
+cp .dev.vars.example .dev.vars    # fill in fake values; DEV_BYPASS=true skips Access on localhost
 bun run db:migrate:local
-bun run dev           # Worker + UI with local D1 and R2
-bun run test          # Vitest
+bun run dev                       # Worker (wrangler dev) and UI (Vite) together
+bun run test                      # Vitest
 bun run typecheck
 ```
+
+`bun run dev` needs Docker, because the job container runs under `wrangler dev`.
+Without Docker, you can start the Worker with `bunx wrangler dev --enable-containers=false`.
+Backups and connection tests cannot run in that mode.
 
 Project layout:
 
@@ -355,15 +383,18 @@ Project layout:
 cellar/
 ├── src/
 │   ├── worker/       # Hono API, cron, queue consumer, retention, alerts
-│   ├── ui/           # React + Vite dashboard
-│   └── shared/       # Zod schemas, types
+│   └── shared/       # Code shared by the Worker and the UI
+├── ui/               # React + Vite dashboard
 ├── container/        # Dockerfile and job runner (pg_dump / pg_restore)
 ├── migrations/       # Drizzle migrations for D1
+├── test/             # Vitest tests, mirrors the source folders
+├── docs/             # Plan, runbooks, onboarding guide
 ├── wrangler.jsonc
 └── .dev.vars.example
 ```
 
-The retention logic lives in a pure function, `selectBackupsToDelete(backups, policy, now, tz)`, with full unit test coverage. Any change to retention must include tests.
+The retention logic lives in a pure function, `selectBackupsToDelete(backups, policy, now, tz)`, with full unit test coverage.
+Any change to retention must include tests.
 
 ## Roadmap
 
