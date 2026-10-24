@@ -63,6 +63,7 @@ export const backups = sqliteTable(
     expiresAt: text("expires_at"),
     deletedAt: text("deleted_at"),
     deletedReason: text("deleted_reason"),
+    lastSeq: integer("last_seq").notNull().default(0),
   },
   (t) => [
     index("idx_backups_target_time")
@@ -73,6 +74,35 @@ export const backups = sqliteTable(
     uniqueIndex("uq_backups_target_slot")
       .on(t.targetId, t.scheduleSlot)
       .where(sql`${t.scheduleSlot} IS NOT NULL`),
+    uniqueIndex("uq_backups_active_target")
+      .on(t.targetId)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+  ],
+);
+
+export const connectionTests = sqliteTable(
+  "connection_tests",
+  {
+    id: text("id").primaryKey(),
+    targetId: text("target_id")
+      .notNull()
+      .references(() => targets.id),
+    status: text("status", { enum: ["queued", "running", "success", "failed", "timed_out"] }).notNull(),
+    resultJson: text("result_json"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    lastSeq: integer("last_seq").notNull().default(0),
+    queuedAt: text("queued_at").notNull(),
+    startedAt: text("started_at"),
+    finishedAt: text("finished_at"),
+    heartbeatAt: text("heartbeat_at"),
+  },
+  (t) => [
+    uniqueIndex("uq_connection_tests_active_target")
+      .on(t.targetId)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+    index("idx_connection_tests_status").on(t.status, t.heartbeatAt),
+    index("idx_connection_tests_queued").on(t.queuedAt),
   ],
 );
 
