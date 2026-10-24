@@ -96,7 +96,7 @@ Backups use the PostgreSQL custom format (`-Fc`), which is compressed and restor
 - Cloudflare Zero Trust (the free tier is enough for small teams)
 - [Bun](https://bun.sh) (`bun install` also installs [Wrangler](https://developers.cloudflare.com/workers/wrangler/))
 - Docker (to build the container image locally)
-- PostgreSQL 13 or newer on your VMs
+- PostgreSQL 13 to 18 on your VMs
 
 ## Quick start
 
@@ -223,7 +223,7 @@ Cellar reaches Postgres only through Cloudflare Tunnel.
    The guide has the SQL for PostgreSQL 14 and newer (`pg_read_all_data`) and for PostgreSQL 13 (explicit grants).
 4. **Restore role.** Prepare a role that can drop and create objects in the destination database.
    Cellar needs this as a separate restore URL.
-5. **Register it.** In the dashboard, select **Add database** and fill in the connection details, schedule, retention, and alert channels.
+5. **Register it.** In the dashboard, select **New target** and fill in the connection details, schedule, retention, and alert channels.
    The dashboard saves a new database as disabled.
    Save it, select **Test connection** on its page, and enable it when the test passes.
 
