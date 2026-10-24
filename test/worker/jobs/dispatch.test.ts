@@ -52,11 +52,12 @@ describe("enqueueDueBackups", () => {
     expect(sent).toHaveLength(1);
   });
 
-  it("does not enqueue twice when two ticks run at the same time", async () => {
+  it("does not create a second job when two ticks run at the same time", async () => {
     await insertTarget(env, "t1");
     await Promise.all([enqueueDueBackups(env, NOW), enqueueDueBackups(env, NOW)]);
-    expect(await allBackups()).toHaveLength(1);
-    expect(sent).toHaveLength(1);
+    const rows = await allBackups();
+    expect(rows).toHaveLength(1);
+    expect(new Set(sent.map((message) => message.jobId))).toEqual(new Set([rows[0]?.id]));
   });
 
   it("does not enqueue twice when a first tick died before advancing next_run_at", async () => {
@@ -68,6 +69,40 @@ describe("enqueueDueBackups", () => {
     expect(result.enqueued).toHaveLength(0);
     expect(await allBackups()).toHaveLength(1);
     expect(sent).toHaveLength(1);
+    expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
+  });
+
+  it("re-sends the message when a previous tick died between the insert and the send", async () => {
+    await insertTarget(env, "t1");
+    await insertBackup(env, "crashed", "t1", { status: "queued", trigger: "schedule", scheduleSlot: DUE_SLOT });
+    const result = await enqueueDueBackups(env, NOW);
+    expect(result.enqueued).toEqual(["crashed"]);
+    expect(await allBackups()).toHaveLength(1);
+    expect(sent).toEqual([{ jobId: "crashed", type: "backup", targetId: "t1" }]);
+    expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
+  });
+
+  it("does not re-send when the same-slot row is running or finished", async () => {
+    await insertTarget(env, "t1");
+    await insertBackup(env, "slot", "t1", { status: "running", trigger: "schedule", scheduleSlot: DUE_SLOT });
+    expect((await enqueueDueBackups(env, NOW)).enqueued).toEqual([]);
+    expect(sent).toEqual([]);
+    await getDb(env).update(backups).set({ status: "success" });
+    await getDb(env).update(targets).set({ nextRunAt: DUE_SLOT }).where(eq(targets.id, "t1"));
+    expect((await enqueueDueBackups(env, NOW)).enqueued).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(await allBackups()).toHaveLength(1);
+  });
+
+  it("marks the still-queued slot row failed and still advances when the re-send fails", async () => {
+    const failing = fakeQueue({ failSend: true });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failingEnv = { ...env, JOBS: failing.queue } as Env;
+    await insertTarget(env, "t1");
+    await insertBackup(env, "crashed", "t1", { status: "queued", trigger: "schedule", scheduleSlot: DUE_SLOT });
+    await enqueueDueBackups(failingEnv, NOW);
+    expect(await allBackups()).toHaveLength(1);
+    expect((await allBackups())[0]).toMatchObject({ id: "crashed", status: "failed", errorCode: "enqueue_failed" });
     expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
   });
 

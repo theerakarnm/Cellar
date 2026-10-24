@@ -33,6 +33,7 @@ async function enqueue(env: Env, message: JobMessage, now: Date): Promise<boolea
 }
 
 export interface EnqueueResult {
+  /** Backup ids whose queue message was sent this tick, including re-sends for still-`queued` slot rows. */
   enqueued: string[];
   /** Targets whose slot was due but which already have a queued or running backup. They are retried next tick. */
   blocked: string[];
@@ -40,7 +41,9 @@ export interface EnqueueResult {
 
 /**
  * Cron step 1. For each due target: insert the `queued` row for the slot (the unique indexes make this
- * idempotent), send the queue message only if a row was inserted, then advance `next_run_at`.
+ * idempotent), send the queue message, then advance `next_run_at`. When the slot row already exists and is
+ * still `queued`, a previous tick may have died between the insert and the send, so the message is sent
+ * again; the consumer claim is idempotent. A running or finished slot row is never re-sent.
  */
 export async function enqueueDueBackups(env: Env, now: Date): Promise<EnqueueResult> {
   const db = getDb(env);
@@ -67,7 +70,7 @@ export async function enqueueDueBackups(env: Env, now: Date): Promise<EnqueueRes
 
       if (inserted.length === 0) {
         const [sameSlot] = await db
-          .select({ id: backups.id })
+          .select({ id: backups.id, status: backups.status })
           .from(backups)
           .where(and(eq(backups.targetId, target.id), eq(backups.scheduleSlot, slot)))
           .limit(1);
@@ -75,6 +78,10 @@ export async function enqueueDueBackups(env: Env, now: Date): Promise<EnqueueRes
           result.blocked.push(target.id);
           continue;
         }
+        const reSent =
+          sameSlot.status === "queued" &&
+          (await enqueue(env, { jobId: sameSlot.id, type: "backup", targetId: target.id }, now));
+        if (reSent) result.enqueued.push(sameSlot.id);
       } else if (await enqueue(env, { jobId, type: "backup", targetId: target.id }, now)) {
         result.enqueued.push(jobId);
       }
