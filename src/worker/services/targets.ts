@@ -143,3 +143,70 @@ export async function listTargets(env: Env, query: { limit: number; cursor?: str
   const views = await Promise.all(rows.map((row) => toTargetView(env, row, channels.get(row.id) ?? [], stats.get(row.id) ?? EMPTY_STATS)));
   return toPage(views, query.limit, (view) => [view.name]);
 }
+
+export async function updateTarget(env: Env, id: string, input: UpdateTargetInput, actor: Actor): Promise<TargetView> {
+  const db = getDb(env);
+  const row = await requireTarget(db, id);
+  const key = env.ENCRYPTION_KEY;
+  if (input.name !== undefined) await assertNameFree(db, input.name, id);
+  if (input.alertChannelIds) await assertChannelsExist(db, input.alertChannelIds);
+
+  const patch: Partial<typeof targets.$inferInsert> = {};
+  if (input.tunnel?.hostname !== undefined) patch.tunnelHostname = input.tunnel.hostname;
+  if (input.tunnel?.tokenId !== undefined) patch.tunnelTokenIdEnc = await encrypt(input.tunnel.tokenId, key);
+  if (input.tunnel?.tokenSecret !== undefined) patch.tunnelTokenSecretEnc = await encrypt(input.tunnel.tokenSecret, key);
+
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.projectTag !== undefined) patch.projectTag = input.projectTag;
+  if (input.connectionUrl !== undefined) {
+    patch.connectionUrlEnc = await encrypt(input.connectionUrl, key);
+    patch.dbName = dbNameOf(input.connectionUrl);
+  }
+  if (input.restoreUrl !== undefined) patch.restoreUrlEnc = input.restoreUrl === null ? null : await encrypt(input.restoreUrl, key);
+  if (input.retention?.keepLast !== undefined) patch.keepLast = input.retention.keepLast;
+  if (input.retention?.daily !== undefined) patch.keepDaily = input.retention.daily;
+  if (input.retention?.weekly !== undefined) patch.keepWeekly = input.retention.weekly;
+  if (input.retention?.monthly !== undefined) patch.keepMonthly = input.retention.monthly;
+  if (input.retention?.maxAgeDays !== undefined) patch.maxAgeDays = input.retention.maxAgeDays;
+  if (input.jobDeadlineMinutes !== undefined) patch.jobDeadlineMinutes = input.jobDeadlineMinutes;
+  if (input.staleAfterHours !== undefined) patch.staleAfterHours = input.staleAfterHours;
+  if (input.alertFailureThreshold !== undefined) patch.alertFailureThreshold = input.alertFailureThreshold;
+
+  const scheduleCron = input.scheduleCron ?? row.scheduleCron;
+  const timezone = input.timezone ?? row.timezone;
+  const enabled = input.enabled ?? row.enabled;
+  patch.scheduleCron = scheduleCron;
+  patch.timezone = timezone;
+  patch.enabled = enabled;
+  const now = new Date();
+  if (scheduleCron !== row.scheduleCron || timezone !== row.timezone || enabled !== row.enabled) {
+    patch.nextRunAt = scheduleFor(scheduleCron, timezone, enabled, now);
+  }
+  patch.updatedAt = now.toISOString();
+
+  const { connectionUrl, restoreUrl, tunnel, ...plainFields } = input;
+  const secretsChanged = [
+    connectionUrl !== undefined && "connectionUrl",
+    restoreUrl !== undefined && "restoreUrl",
+    tunnel?.tokenId !== undefined && "tunnel.tokenId",
+    tunnel?.tokenSecret !== undefined && "tunnel.tokenSecret",
+  ].filter(Boolean);
+
+  const statements: Statements = [
+    db.update(targets).set(patch).where(eq(targets.id, id)),
+    auditInsert(db, {
+      actor: actor.email,
+      ip: actor.ip,
+      action: "target.update",
+      entityType: "target",
+      entityId: id,
+      details: { ...plainFields, tunnelHostname: tunnel?.hostname, secretsChanged },
+    }),
+  ];
+  if (input.alertChannelIds) {
+    statements.push(db.delete(targetAlertChannels).where(eq(targetAlertChannels.targetId, id)));
+    if (input.alertChannelIds.length > 0) statements.push(db.insert(targetAlertChannels).values(channelLinks(id, input.alertChannelIds)));
+  }
+  await db.batch(statements);
+  return getTarget(env, id);
+}
