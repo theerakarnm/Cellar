@@ -2,6 +2,7 @@ import { and, eq, inArray, lt, lte } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { backups, connectionTests, targets } from "../db/schema";
 import type { Env } from "../env";
+import { sweepRestores } from "./restore-sweeper";
 import {
   CONNECTION_TEST_RETENTION_MS,
   HEARTBEAT_TIMEOUT_MS,
@@ -33,7 +34,8 @@ function timeoutReason(row: RunningRow, nowMs: number): "DEADLINE_EXCEEDED" | "H
 /**
  * Cron step 2. Running jobs without a heartbeat for 5 minutes or past their deadline become `timed_out`
  * (and their container is stopped). Jobs `queued` for more than 1 hour become `failed` with `queue_timeout`.
- * Finished connection tests older than 7 days are deleted. Applies to `backups` and `connection_tests`.
+ * Finished connection tests older than 7 days are deleted. Applies to `backups`, `connection_tests`, and, via
+ * `sweepRestores`, `restores`.
  */
 export async function sweepStaleJobs(env: Env, now: Date, stop: (jobId: string) => Promise<void>): Promise<SweepResult> {
   const db = getDb(env);
@@ -105,5 +107,7 @@ export async function sweepStaleJobs(env: Env, now: Date, stop: (jobId: string) 
         lt(connectionTests.queuedAt, new Date(nowMs - CONNECTION_TEST_RETENTION_MS).toISOString()),
       ),
     );
+
+  await sweepRestores(env, now);
   return result;
 }
