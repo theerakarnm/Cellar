@@ -169,6 +169,9 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
           <p>
             Keeps {preview.keep.length}, would delete {preview.delete.length}. No changes were made.
           </p>
+          <p className={`note ${preview.dryRun ? "note-warn" : "note-error"}`} role="status">
+            {preview.dryRun ? "Dry run is ON: nothing is deleted yet." : "Dry run is OFF: these backups will be deleted at the next retention run."}
+          </p>
           {rows.length > 0 ? (
             <table className="stack">
               <thead>

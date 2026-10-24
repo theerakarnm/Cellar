@@ -9,6 +9,7 @@ export function GlobalSettings() {
   const [concurrency, setConcurrency] = useState("");
   const [dryRun, setDryRun] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
 
   useEffect(() => {
@@ -22,14 +23,18 @@ export function GlobalSettings() {
   const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 10;
 
   async function save() {
+    if (saving) return;
     setError(undefined);
     setSaved(false);
+    setSaving(true);
     try {
       await api<Settings>("PUT", "/api/settings", { max_concurrent_jobs: parsed, retention_dry_run: dryRun });
       setSaved(true);
       settings.reload();
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -50,7 +55,7 @@ export function GlobalSettings() {
         <p className="note note-error">Retention dry run is OFF: retention deletes expired backups from R2. The newest successful backup of each target is always kept.</p>
       )}
       <div className="actions">
-        <button type="button" className="primary" disabled={!valid || !settings.data} onClick={save}>
+        <button type="button" className="primary" disabled={!valid || !settings.data || saving} onClick={save}>
           Save
         </button>
         {saved ? <span className="note-ok-text">Saved</span> : null}

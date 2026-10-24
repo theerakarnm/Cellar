@@ -99,17 +99,21 @@ export function ChannelsSection() {
 function ChannelFormView({ initial, id, onClose, onSaved }: { initial: ChannelForm; id: string | null; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState(initial);
   const [error, setError] = useState<Error | undefined>();
+  const [saving, setSaving] = useState(false);
   const mode = id ? "edit" : "create";
   const patch = (change: Partial<ChannelForm>) => setForm((prev) => ({ ...prev, ...change }));
 
   async function save() {
+    if (saving) return;
     const built = channelPayload(form, mode);
     if ("error" in built) return setError(new Error(built.error));
+    setSaving(true);
     try {
       await (id ? api("PATCH", `/api/alert-channels/${id}`, built.body) : api("POST", "/api/alert-channels", built.body));
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
+      setSaving(false);
     }
   }
 
@@ -169,7 +173,7 @@ function ChannelFormView({ initial, id, onClose, onSaved }: { initial: ChannelFo
         Enabled
       </label>
       <div className="actions">
-        <button type="submit" className="primary">
+        <button type="submit" className="primary" disabled={saving}>
           Save
         </button>
         <button type="button" onClick={onClose}>

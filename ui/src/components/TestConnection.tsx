@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollUntil } from "../api/poll";
 import type { ConnectionTest } from "../api/types";
@@ -9,8 +9,13 @@ export function TestConnection({ targetId }: { targetId: string }) {
   const [test, setTest] = useState<ConnectionTest | undefined>();
   const [error, setError] = useState<Error | undefined>();
   const [busy, setBusy] = useState(false);
+  const controller = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => controller.current?.abort(), []);
 
   async function run() {
+    const abort = new AbortController();
+    controller.current = abort;
     setBusy(true);
     setError(undefined);
     setTest(undefined);
@@ -19,12 +24,15 @@ export function TestConnection({ targetId }: { targetId: string }) {
       await pollUntil(() => api<ConnectionTest>("GET", `/api/targets/${targetId}/test/${testId}`), (t) => isTerminalStatus(t.status), {
         intervalMs: 1500,
         maxAttempts: 80,
-        onUpdate: setTest,
+        signal: abort.signal,
+        onUpdate: (t) => {
+          if (!abort.signal.aborted) setTest(t);
+        },
       });
     } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)));
+      if (!abort.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
     } finally {
-      setBusy(false);
+      if (!abort.signal.aborted) setBusy(false);
     }
   }
 

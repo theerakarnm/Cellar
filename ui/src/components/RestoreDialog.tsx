@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollUntil } from "../api/poll";
 import type { Backup, RestoreRun, TargetSummary } from "../api/types";
@@ -21,26 +21,36 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | undefined>();
   const [run, setRun] = useState<RestoreRun | undefined>();
+  const [restoreId, setRestoreId] = useState<string | undefined>();
+  const controller = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => controller.current?.abort(), []);
 
   const destination = targets.find((t) => t.id === destinationId);
   const sameDatabase = destination !== undefined && destination.id === backup.targetId;
   const ready = canSubmitRestore({ typedName, destinationName: destination?.name ?? "", sameDatabase, acknowledged });
 
   async function submit() {
-    if (!destination) return;
+    if (!destination || busy || restoreId) return;
+    const abort = new AbortController();
+    controller.current = abort;
     setBusy(true);
     setError(undefined);
     try {
-      const { restoreId } = await api<{ restoreId: string }>("POST", `/api/backups/${backup.id}/restore`, restoreRequest(destination.id, typedName, sameDatabase));
-      await pollUntil(() => api<RestoreRun>("GET", `/api/restores/${restoreId}`), (r) => isTerminalStatus(r.status), {
+      const started = await api<{ restoreId: string }>("POST", `/api/backups/${backup.id}/restore`, restoreRequest(destination.id, typedName, sameDatabase));
+      setRestoreId(started.restoreId);
+      await pollUntil(() => api<RestoreRun>("GET", `/api/restores/${started.restoreId}`), (r) => isTerminalStatus(r.status), {
         intervalMs: 2000,
         maxAttempts: 900,
-        onUpdate: setRun,
+        signal: abort.signal,
+        onUpdate: (r) => {
+          if (!abort.signal.aborted) setRun(r);
+        },
       });
     } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)));
+      if (!abort.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
     } finally {
-      setBusy(false);
+      if (!abort.signal.aborted) setBusy(false);
     }
   }
 
@@ -86,11 +96,11 @@ function RestoreForm({ backup, targets, onClose }: { backup: Backup; targets: Ta
         </p>
       ) : null}
       <div className="actions">
-        <button type="submit" className="danger" disabled={!ready || busy}>
+        <button type="submit" className="danger" disabled={!ready || busy || restoreId !== undefined}>
           {busy ? "Restoring..." : "Restore"}
         </button>
         <button type="button" onClick={onClose}>
-          {run && isTerminalStatus(run.status) ? "Close" : "Cancel"}
+          {restoreId !== undefined ? "Close" : "Cancel"}
         </button>
       </div>
     </form>
