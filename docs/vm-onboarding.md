@@ -118,6 +118,9 @@ Notes for PostgreSQL 13:
 - `ALTER DEFAULT PRIVILEGES` only covers objects created later by the role that runs it.
   If your app creates tables as another role, also run `ALTER DEFAULT PRIVILEGES FOR ROLE <app_owner> IN SCHEMA <schema> GRANT SELECT ON TABLES TO cellar_backup;` (and the same for `SEQUENCES`).
 - Run the block again after you add a new schema.
+- The connection test in Cellar reports `Role lacks pg_read_all_data.` on PostgreSQL 13.
+  Cellar asks the server whether the role holds `pg_read_all_data`, and PostgreSQL 13 cannot answer because that role does not exist there.
+  The message therefore shows even when the grants above are correct, so judge the role by the `pg_dump` check below instead.
 - If the database uses large objects, `pg_dump` also needs `SELECT` on them.
   The Cellar project has not tested this case.
 

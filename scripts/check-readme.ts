@@ -80,11 +80,14 @@ const BANNED: [RegExp, string][] = [
 ];
 for (const [file, text] of Object.entries(docs)) {
   for (const [re, label] of BANNED) if (re.test(text)) fail(`${file}: contains ${label}`);
-  for (const m of text.matchAll(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)+)\.(?:com|io|dev|net|org|app|me)\b/g)) {
+  for (const m of text.matchAll(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)+)\.(?:com|io|dev|net|org|app|me|co|th|ai|cloud)\b/g)) {
     const host = m[0];
     if (!/(^|\.)(example\.com|github\.com|cloudflare\.com|cloudflarestorage\.com|bun\.sh|postgresql\.org|discord\.com|discordapp\.com)$/.test(host) && !/^(yourteam|myteam)\.cloudflareaccess\.com$/.test(host)) {
       fail(`${file}: hostname ${host} is not an allowed placeholder`);
     }
+  }
+  for (const m of text.matchAll(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)) {
+    if (!/@(?:[a-z0-9-]+\.)*example\.com$/i.test(m[0])) fail(`${file}: email ${m[0]} is not an example.com placeholder`);
   }
 }
 

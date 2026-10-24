@@ -6,8 +6,15 @@ This page covers setup, the checks to run before a pull request, and the rules t
 ## Set up
 
 You need [Bun](https://bun.sh).
-`bun run dev` also needs Docker, because the Phase 5 job container runs locally with it.
-Without Docker, run the tests and typecheck, and use `bunx wrangler dev --local --enable-containers=false` for the API only.
+`bun run dev` also needs Docker, because the job container runs locally with it.
+Running `bun run dev` with Docker has not been verified yet (see the Quick start note in the README).
+Without Docker, run the tests and typecheck, and serve the API alone.
+`wrangler dev` refuses to start while the built UI folder is missing, so build the UI first:
+
+```bash
+bun run build:ui
+bunx wrangler dev --local --enable-containers=false
+```
 
 ```bash
 git clone https://github.com/theerakarnm/cellar.git

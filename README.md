@@ -100,6 +100,10 @@ Backups use the PostgreSQL custom format (`-Fc`), which is compressed and restor
 
 ## Quick start
 
+> **To verify at first deploy.** These steps have not been run against a real Cloudflare account yet.
+> The callouts below list the parts that need a first real deploy: the tunnel path, the container callback, and real alert delivery.
+> Local `bun run dev` with Docker and the first `bun run deploy` (step 5) are untested for the same reason.
+
 ### 1. Clone and install
 
 ```bash
@@ -268,8 +272,8 @@ A backup is kept if **any** rule keeps it.
 Everything else is deleted from R2 first, and then its D1 row is soft-deleted.
 The row stays for the audit trail.
 
-Example: `keep_last=3, daily=7, weekly=4, monthly=6` with one backup per day keeps 14 backups once there are about five months of backups.
-It keeps 10 with one month of backups and 13 with four months.
+Example: `keep_last=3, daily=7, weekly=4, monthly=6` with one backup per day keeps 13 to 15 backups (usually 14) once the history spans about five months.
+With one month of backups it keeps 9 to 11 (usually 10), and with four months 12 to 14 (usually 13).
 
 Retention runs after every successful backup and once a day.
 Each run deletes at most 50 backups.
@@ -373,7 +377,8 @@ See [SECURITY.md](SECURITY.md).
   The dashboard shows the total backup size and the size of each database.
 - Backups are uploaded in multipart parts of 32 MiB by default.
   R2 allows at most 10,000 parts per upload, so Cellar uses larger parts for a large database.
-  A part is at most 128 MiB, so one dump can be up to about 1.2 TiB.
+  A part is at most 128 MiB, which covers a database of about 950 GiB.
+  Cellar rejects larger databases before the dump starts.
 - Add an R2 bucket lifecycle rule that aborts incomplete multipart uploads after 1 day.
   Cellar does not create this rule for you.
   See the Cloudflare docs on [R2 object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
@@ -381,8 +386,10 @@ See [SECURITY.md](SECURITY.md).
   Backups run at most `max_concurrent_jobs` at a time.
   This is a global setting, 1 by default, up to 10.
   Restores and connection tests do not count toward it, so one container stays free for them.
+  Raising `max_concurrent_jobs` to 2, the default `max_instances`, leaves no container free for restores and tests.
+  Raise `max_instances` along with it and keep `max_concurrent_jobs` below `max_instances`.
 - Every new database uses the schedule `0 2 * * *` (02:00) by default.
-  With one backup at a time, give databases different schedules, or raise `max_concurrent_jobs`.
+  With one backup at a time, give databases different schedules, or raise `max_concurrent_jobs` while keeping it below `max_instances`.
 
 ## Development
 
@@ -396,7 +403,15 @@ bun run typecheck
 ```
 
 `bun run dev` needs Docker, because the job container runs under `wrangler dev`.
-Without Docker, you can start the Worker with `bunx wrangler dev --enable-containers=false`.
+Running it with Docker has not been verified yet, see the note at the top of the Quick start.
+Without Docker, you can serve the API alone.
+`wrangler dev` refuses to start while the built UI folder is missing, so build the UI first:
+
+```bash
+bun run build:ui
+bunx wrangler dev --local --enable-containers=false
+```
+
 Backups and connection tests cannot run in that mode.
 
 Project layout:
