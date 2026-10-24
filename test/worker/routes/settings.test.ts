@@ -22,14 +22,14 @@ const get = () => app.request("http://localhost/api/settings", {}, env);
 
 describe("settings routes", () => {
   it("returns code defaults when nothing is stored", async () => {
-    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1 });
+    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1, retention_dry_run: true });
   });
 
   it("stores a valid value, returns it from GET, and writes an audit row", async () => {
     const response = await put({ max_concurrent_jobs: 4 });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ max_concurrent_jobs: 4 });
-    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 4 });
+    expect(await response.json()).toEqual({ max_concurrent_jobs: 4, retention_dry_run: true });
+    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 4, retention_dry_run: true });
     const audit = await getDb(env).select().from(auditLogs);
     expect(audit[0]).toMatchObject({ action: "settings.update", actor: "dev@localhost", entityType: "settings", details: '{"max_concurrent_jobs":4}' });
   });
@@ -38,10 +38,28 @@ describe("settings routes", () => {
     "rejects %j with 400 and stores nothing",
     async (body) => {
       expect((await put(body)).status).toBe(400);
-      expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1 });
+      expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1, retention_dry_run: true });
       expect(await getDb(env).select().from(auditLogs)).toHaveLength(0);
     },
   );
+
+  it("accepts a boolean retention_dry_run and rejects other values", async () => {
+    const ok = await put({ retention_dry_run: false });
+    expect(ok.status).toBe(200);
+    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1, retention_dry_run: false });
+
+    const bad = await put({ retention_dry_run: "no" });
+    expect(bad.status).toBe(400);
+    const audit = await getDb(env).select().from(auditLogs);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ action: "settings.update", details: '{"retention_dry_run":false}' });
+  });
+
+  it("does not let a client write the internal retention_last_run key", async () => {
+    const res = await put({ retention_last_run: { date: "2099-01-01", dryRun: false } });
+    expect(res.status).toBe(400);
+    expect(await (await get()).json()).toEqual({ max_concurrent_jobs: 1, retention_dry_run: true });
+  });
 
   it("is protected by Access", async () => {
     const prod = { ...env, DEV_BYPASS: "" } as Env;
