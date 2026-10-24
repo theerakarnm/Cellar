@@ -43,7 +43,7 @@ bun run test
 bun scripts/check-readme.ts
 ```
 
-The docs check compares `README.md`, this file, `SECURITY.md`, and the files in `docs/` with the code.
+The docs check compares `README.md`, this file, `SECURITY.md`, `docs/vm-onboarding.md`, `docs/restore-runbook.md`, and `docs/alerts.md` with the code.
 It checks scripts, environment variables, routes, resource names, and links.
 
 Rules:

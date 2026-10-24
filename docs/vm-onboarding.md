@@ -177,7 +177,7 @@ The step-by-step restore procedure lives in `docs/restore-runbook.md`.
 
 ## 5. Register the database in Cellar
 
-In the dashboard, select **Add database** and fill in:
+In the dashboard, select **New target** and fill in:
 
 - **Name** and an optional **project tag**
 - **Connection URL**, for example `postgresql://cellar_backup:use-a-strong-password@db-shop.example.com:5432/shop` (the host is the tunnel hostname, Cellar swaps it for the local tunnel port at run time)

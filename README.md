@@ -146,10 +146,15 @@ Set the secrets:
 ```bash
 bunx wrangler secret put ENCRYPTION_KEY          # 32-byte base64 key, see below
 bunx wrangler secret put ACCESS_TEAM_DOMAIN      # e.g. yourteam.cloudflareaccess.com
-bunx wrangler secret put ACCESS_AUD              # Access application AUD tag
+bunx wrangler secret put ACCESS_AUD              # placeholder for now, real value in step 7
 bunx wrangler secret put R2_ACCESS_KEY_ID        # from the R2 token
 bunx wrangler secret put R2_SECRET_ACCESS_KEY    # from the R2 token
 ```
+
+The first `wrangler secret put` asks whether to create the Worker `cellar`, because it does not exist until step 5.
+Answer yes.
+`ACCESS_AUD` is the audience tag of the Access application, which you create in step 7.
+Enter any placeholder now, then run `bunx wrangler secret put ACCESS_AUD` again after step 7.
 
 Set the plain values in the `vars` block of `wrangler.jsonc`:
 
@@ -157,7 +162,7 @@ Set the plain values in the `vars` block of `wrangler.jsonc`:
 "vars": {
   "R2_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com",
   "R2_BUCKET": "cellar-backups",
-  "APP_BASE_URL": "https://cellar.example.com"
+  "APP_BASE_URL": "https://cellar.example.com" // your Cellar URL, chosen in step 6
 }
 ```
 
@@ -165,12 +170,12 @@ Set the plain values in the `vars` block of `wrangler.jsonc`:
 |---|---|---|
 | `ENCRYPTION_KEY` | secret | Base64 of 32 random bytes. Encrypts stored credentials. |
 | `ACCESS_TEAM_DOMAIN` | secret | Your Access team domain, hostname only. |
-| `ACCESS_AUD` | secret | Audience (AUD) tag of the Cellar Access application. |
+| `ACCESS_AUD` | secret | Audience (AUD) tag of the Cellar Access application. Placeholder until step 7. |
 | `R2_ACCESS_KEY_ID` | secret | Access Key ID of the bucket-scoped R2 token. |
 | `R2_SECRET_ACCESS_KEY` | secret | Secret Access Key of the same token. |
 | `R2_ENDPOINT` | var | S3 endpoint of your R2 account. |
 | `R2_BUCKET` | var | Name of the backup bucket. |
-| `APP_BASE_URL` | var | Public URL of Cellar. Used for links in alerts. |
+| `APP_BASE_URL` | var | Public URL of Cellar, the hostname chosen in step 6. Used for links in alerts. |
 | `R2_REGION` | optional var | SigV4 region for download links. Leave it empty for R2 (it uses `auto`). |
 | `CALLBACK_BASE_URL` | optional var | Public Worker URL for container callbacks. Leave it empty (see Access setup). |
 | `DEV_BYPASS` | local only | `true` skips Access for requests to `localhost`. Never set it in production. |
@@ -192,12 +197,24 @@ For local development, copy `.dev.vars.example` to `.dev.vars` and fill in the v
 bun run deploy
 ```
 
-### 6. Protect the app with Cloudflare Access
+The deploy output prints the Worker's `workers.dev` URL.
+
+### 6. Give the Worker its hostname
+
+The Access application and `APP_BASE_URL` both need the hostname that serves Cellar.
+Choose one:
+
+- Use the `workers.dev` URL from the deploy output.
+- Or attach a custom domain: in the dashboard, go to **Workers & Pages > cellar > Settings > Domains & Routes**, add a **Custom domain**, and follow the steps (for example `cellar.example.com`).
+
+Set `APP_BASE_URL` in `wrangler.jsonc` to the URL you chose, then run `bun run deploy` again.
+
+### 7. Protect the app with Cloudflare Access
 
 1. In Zero Trust, go to **Access > Applications > Add an application > Self-hosted**.
-2. Set the application domain to your Cellar hostname.
+2. Set the application domain to the hostname from step 6.
 3. Add a policy (for example, allow emails ending in `@yourcompany.com`).
-4. Copy the **Application Audience (AUD) tag** into the `ACCESS_AUD` secret.
+4. Copy the **Application Audience (AUD) tag** and run `bunx wrangler secret put ACCESS_AUD` to replace the placeholder from step 4.
 
 Cellar verifies the Access JWT on every `/api` request, except `GET /api/health`, which returns only `{ "ok", "version" }` (nothing about targets or config).
 Requests without a valid token are rejected with `401`.
@@ -403,9 +420,10 @@ Any change to retention must include tests.
 
 ## Roadmap
 
-- [ ] v0.1 - targets, scheduled backups, R2 upload, retention
-- [ ] v0.2 - restore, download, alerts
-- [ ] v0.3 - dashboard polish, audit log viewer
+- [x] v0.1 - targets, scheduled backups, R2 upload, retention
+- [x] v0.2 - restore, download, alerts
+- [x] v0.3 - dashboard, audit log viewer
+- [ ] First real deploy - verify the tunnel path, the container callback path, and real LINE and Discord delivery
 - [ ] Later - backup verification (automatic test restores), client-side encryption of dump files, per-project access rules, more alert channels
 
 ## Contributing

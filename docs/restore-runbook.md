@@ -86,11 +86,20 @@ Use this when the dashboard is not available or when you want to restore on your
 
 1. Get a download link.
    See [Download a backup](#download-a-backup).
-2. Download the file:
+2. Download the file.
+   The presigned URL is a bearer secret.
+   Anyone who holds it can download the backup for up to 15 minutes.
+   Keep it out of shell history, logs, screenshots, and shared terminals.
+
+   Read the URL into a variable instead of putting it on the command line:
 
    ```bash
-   curl -fL -o backup.dump "<presigned-url>"
+   read -r URL   # paste the presigned URL, press Enter
+   curl -fL -o backup.dump "$URL"
+   unset URL
    ```
+
+   For scripts, write the URL to a file with restricted permissions and pass it to curl with `--config`, which also keeps it out of the process list.
 
 3. Check the checksum.
    It must equal the `sha256` value of the backup.

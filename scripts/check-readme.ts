@@ -3,7 +3,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const argFiles = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const DOCS = (argFiles.length ? argFiles : ["README.md", "CONTRIBUTING.md", "SECURITY.md", "docs/vm-onboarding.md", "docs/restore-runbook.md", ".github/workflows/ci.yml"]).filter(existsSync);
+const DOCS = (argFiles.length ? argFiles : ["README.md", "CONTRIBUTING.md", "SECURITY.md", "docs/vm-onboarding.md", "docs/restore-runbook.md", "docs/alerts.md", ".github/workflows/ci.yml"]).filter(existsSync);
 const read = (p: string) => readFileSync(p, "utf8");
 const docs = Object.fromEntries(DOCS.map((p) => [p, read(p)]));
 const all = Object.values(docs).join("\n");

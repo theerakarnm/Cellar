@@ -4,9 +4,15 @@ Cellar sends alerts to LINE and Discord when a backup needs attention.
 
 ## Events
 
-- `backup_failed`: a backup ended as `failed` or `timed_out`. Sent on every failure.
-- `backup_consecutive_failures`: a target reached N failures in a row (default 3, set per target on the target form or API). Sent once. A success resets the count and re-arms the alert.
-- `backup_stale`: a target has no successful backup within its stale limit. Sent once per stale episode. The next success re-arms it.
+- `backup_failed`: a backup ended as `failed` or `timed_out`.
+  Sent on every failure.
+- `backup_consecutive_failures`: a target reached N failures in a row.
+  The default N is 3, and it is set per target on the target form or API.
+  Sent once.
+  A success resets the count and re-arms the alert.
+- `backup_stale`: a target has no successful backup within its stale limit.
+  Sent once per stale episode.
+  The next success re-arms it.
 - `retention_failed` and `restore_finished` can be selected on a channel, but Cellar does not send them yet.
 
 On the Nth failure a channel that listens to both `backup_failed` and `backup_consecutive_failures` gets two messages.
