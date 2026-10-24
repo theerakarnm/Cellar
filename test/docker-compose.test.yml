@@ -1,0 +1,65 @@
+# Local stand-ins for the Phase 4 container tests: Postgres 14 and 17 plus an S3-compatible store for R2.
+# Used by container/e2e/*.ts. Never points at a real Cloudflare resource.
+name: cellar-test
+
+services:
+  pg14:
+    image: postgres:14
+    environment: &pg-env
+      POSTGRES_USER: cellar
+      POSTGRES_PASSWORD: cellar-test-pw
+      POSTGRES_DB: shop
+    volumes:
+      - ./fixtures/seed.sql:/docker-entrypoint-initdb.d/10-seed.sql:ro
+    healthcheck: &pg-health
+      test: ["CMD-SHELL", "pg_isready -U cellar -d shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pg17:
+    image: postgres:17
+    environment: *pg-env
+    volumes:
+      - ./fixtures/seed.sql:/docker-entrypoint-initdb.d/10-seed.sql:ro
+    healthcheck: *pg-health
+
+  # Test and dev only S3 stand-in (owner-approved RustFS), never in the production image. Override with S3_IMAGE.
+  s3:
+    image: ${S3_IMAGE:-rustfs/rustfs:1.0.3}
+    user: "0:0"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_ACCESS_KEY: cellar-test-access
+      RUSTFS_SECRET_KEY: cellar-test-secret
+    volumes:
+      - s3data:/data
+    ports:
+      - "19000:9000"
+
+  runner:
+    profiles: ["runner"]
+    image: cellar-runner:dev
+    build:
+      context: ..
+      dockerfile: container/Dockerfile
+    mem_limit: ${RUNNER_MEM_LIMIT:-256m}
+    memswap_limit: ${RUNNER_MEM_LIMIT:-256m}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${JOB_DIR:-/tmp}:/job:ro
+
+  # Local tests only: the same image with a fake cloudflared first on PATH (Task 16). Task 18 uses `runner`.
+  runner-local:
+    profiles: ["runner"]
+    extends:
+      service: runner
+    environment:
+      PATH: /opt/cellar-test:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    volumes:
+      - ../container/e2e/fake-cloudflared.ts:/opt/cellar-test/cloudflared:ro
+
+volumes:
+  s3data:
