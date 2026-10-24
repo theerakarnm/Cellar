@@ -129,3 +129,17 @@ export async function createTarget(env: Env, input: CreateTargetInput, actor: Ac
   await db.batch(statements);
   return getTarget(env, id);
 }
+
+export async function listTargets(env: Env, query: { limit: number; cursor?: string | undefined }): Promise<Page<TargetView>> {
+  const db = getDb(env);
+  const after = query.cursor ? decodeCursor(query.cursor, 1)[0] : undefined;
+  const rows = await db
+    .select()
+    .from(targets)
+    .where(and(isNull(targets.deletedAt), after === undefined ? undefined : gt(targets.name, after)))
+    .orderBy(asc(targets.name))
+    .limit(query.limit + 1);
+  const [channels, stats] = await Promise.all([loadAlertChannelIds(db), loadStats(db)]);
+  const views = await Promise.all(rows.map((row) => toTargetView(env, row, channels.get(row.id) ?? [], stats.get(row.id) ?? EMPTY_STATS)));
+  return toPage(views, query.limit, (view) => [view.name]);
+}

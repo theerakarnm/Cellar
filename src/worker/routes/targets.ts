@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import { createTargetSchema } from "../../shared/target-schema";
-import { parseBody } from "../lib/validate";
+import { paginationQuery } from "../lib/pagination";
+import { parseBody, parseQuery } from "../lib/validate";
 import type { AppEnv } from "../middleware/access";
-import { createTarget, getTarget } from "../services/targets";
+import { createTarget, getTarget, listTargets } from "../services/targets";
 
 export const targetRoutes = new Hono<AppEnv>();
+
+targetRoutes.get("/", async (c) => c.json(await listTargets(c.env, parseQuery(c, paginationQuery))));
 
 targetRoutes.post("/", async (c) => {
   const input = await parseBody(c, createTargetSchema);
