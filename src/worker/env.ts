@@ -12,6 +12,7 @@ export interface Env {
   DEV_BYPASS?: string;
   R2_ENDPOINT: string;
   R2_BUCKET: string;
+  R2_REGION?: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   /** Public Worker URL. Set only when the outbound-handler spike failed; empty means "use the outbound handler". */

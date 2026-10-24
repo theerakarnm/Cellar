@@ -19,6 +19,10 @@ DEV_BYPASS=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 
+# Optional. SigV4 region for presigned download URLs. Leave empty for Cloudflare R2 (it uses "auto").
+# Local RustFS needs us-east-1.
+R2_REGION=
+
 # Local development only: point the container at RustFS (test and dev only) from test/docker-compose.test.yml.
 # These override the placeholder vars in wrangler.jsonc. Example values:
 #   R2_ENDPOINT=http://host.docker.internal:9000
