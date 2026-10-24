@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallbackClient, startHeartbeat } from "../callback";
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyCallback } from "../hmac";
 
@@ -111,17 +111,33 @@ describe("CallbackClient", () => {
   });
 
   it("heartbeat sends progress events until stopped", async () => {
-    const c = client();
-    const stop = startHeartbeat(c, 20);
-    await new Promise((resolve) => setTimeout(resolve, 130));
-    stop();
-    await c.send("succeeded");
-    const events = received.map((r) => JSON.parse(r.body).event);
-    expect(events.filter((e) => e === "progress").length).toBeGreaterThanOrEqual(3);
-    expect(events.at(-1)).toBe("succeeded");
-    const after = received.length;
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(received.length).toBe(after);
+    const realSetTimeout = setTimeout;
+    const realSleep = (ms: number) => new Promise<void>((resolve) => realSetTimeout(resolve, ms));
+    // Fake only the primitives startHeartbeat uses, so real fetch I/O and microtasks keep running.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const c = client();
+      const stop = startHeartbeat(c, 20);
+      // Advance one interval per tick and wait for the receipt before the next,
+      // so the pending-skip never eats a tick and the progress count stays deterministic.
+      for (let n = 0; n < 3; n++) {
+        await vi.advanceTimersByTimeAsync(20);
+        for (let waited = 0; received.length <= n && waited < 5000; waited += 10) await realSleep(10);
+        expect(received.length).toBe(n + 1);
+      }
+      stop();
+      // Four more ticks would fire while stopped if startHeartbeat did not clear the interval.
+      const after = received.length;
+      await vi.advanceTimersByTimeAsync(80);
+      await realSleep(100);
+      expect(received.length).toBe(after);
+      await c.send("succeeded");
+      const events = received.map((r) => JSON.parse(r.body).event);
+      expect(events.filter((e) => e === "progress")).toHaveLength(3);
+      expect(events.at(-1)).toBe("succeeded");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("heartbeat skips a tick while the previous progress call is still pending", async () => {
@@ -141,9 +157,18 @@ describe("CallbackClient", () => {
       timeoutMs: 50,
       sleep: async () => {},
     });
-    const stop = startHeartbeat(c, 20);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    stop();
-    expect(calls).toBe(1);
+    const realSetTimeout = setTimeout;
+    const realSleep = (ms: number) => new Promise<void>((resolve) => realSetTimeout(resolve, ms));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const stop = startHeartbeat(c, 20);
+      // Virtual time fires ticks at 20ms, 40ms and 60ms: only the first sends, the rest hit the pending skip.
+      await vi.advanceTimersByTimeAsync(60);
+      stop();
+      for (let waited = 0; calls < 1 && waited < 5000; waited += 10) await realSleep(10);
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
