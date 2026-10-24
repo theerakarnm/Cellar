@@ -51,12 +51,22 @@ try {
     check(!JSON.stringify(authResult).includes(badPassword) && !authRun.stdout.includes(badPassword) && !authRun.stderr.includes(badPassword), `${label} wrong password never appears in the callback or output`);
   }
 
+  const key17 = "backups/e2e/17/dump.dump";
   const badKeyRun = await runRunner({
     jobId: "s3-bad",
     job: baseJob(listener, "s3-bad", "backup", `postgres://cellar:${PG_PASSWORD}@pg17:5432/shop`, { r2: r2Block({ key: "backups/e2e/bad.dump", partSizeBytes: 5 * 1024 * 1024, secretAccessKey: "not-the-real-secret" }) }),
   });
   const badKey = terminal(listener.eventsFor("s3-bad"));
   check(badKeyRun.code === 1 && badKey?.error?.code === "UPLOAD_FAILED" && !JSON.stringify(badKey).includes("not-the-real-secret"), "bad R2 secret fails with UPLOAD_FAILED, redacted");
+
+  const guardBefore = await counts("pg17", "restore_check");
+  const guardRun = await runRunner({
+    jobId: "restore-guard",
+    job: baseJob(listener, "restore-guard", "restore", `postgres://cellar:${PG_PASSWORD}@pg17:5432/restore_check`, { r2: r2Block(), restore: { sourceKey: key17, targetDbName: "shop" } }),
+  });
+  const guardAfter = await counts("pg17", "restore_check");
+  const guardEvent = listener.eventsFor("restore-guard").find((event) => event.event === "failed");
+  check(guardRun.code === 1 && guardEvent?.error?.code === "INVALID_JOB" && guardBefore === guardAfter, "a restore whose targetDbName differs from the db.url database fails with a failed callback (INVALID_JOB), exit code 1, and leaves the database untouched");
 
   const expiredRun = await runRunner({
     jobId: "expired",
