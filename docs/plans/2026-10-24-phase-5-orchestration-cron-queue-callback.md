@@ -286,6 +286,8 @@ Vitest, files at `test/worker/<mirrors src/worker path>.test.ts`, Node environme
 - [ ] Step 11: Record the result. If Step 10 passed, add `> Spike result: OUTBOUND_OK (date, wrangler version)` under this task in the plan file. If the callback never arrived but the container ran (`docker ps` shows it, or the log shows `callback status`), wait 2 more minutes and re-run Step 10 once; if it still fails, record `> Spike result: FALLBACK (outbound intercept did not deliver)` and use the fallback from "Decisions" item 8 for the rest of the phase. If `exec` or stdin fails, record `> Spike result: STDIN_FAILED` and STOP: Phase 4 must accept the job another way, and the owner decides.
 - [ ] Step 12: Stop the dev server (`pkill -f "wrangler dev --local --port 8796"`) and clean up (`docker ps -a`, then `docker rm -f` any container started during the spike). Verify - Run: `lsof -i :8796` - Expected: no output
 
+> Spike result: INCONCLUSIVE (2026-10-24, wrangler 4.152.0). Image build, DO start, and `container.start()` worked, but `wrangler dev` under podman failed to start its egress sidecar (cloudflare/proxy-everything) with `crun: cannot set memory swappiness with cgroupv2`, so the container never ran and neither OUTBOUND_OK nor FALLBACK was observed. The code keeps the default: empty `CALLBACK_BASE_URL`, outbound intercept path; the fallback config (Decisions item 8) stays documented. Confirm the outbound intercept with Docker Desktop or on a deployed Worker.
+
 ---
 ### Task 2: Schema additions and migration (local D1 only)
 

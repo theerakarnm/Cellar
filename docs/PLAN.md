@@ -39,7 +39,7 @@ flowchart LR
 
 Flow summary:
 1. The single per-minute cron finds due targets (idempotent per schedule slot) and enqueues one `backup` job each.
-2. The queue consumer creates the `backups` row (`queued`), then starts a container through the DO.
+2. The cron (or Backup now) creates the `backups` row (`queued`) and sends an ids-only queue message. The queue consumer claims the row (`running`) and starts a container through the DO.
 3. The container opens a tunnel to Postgres, runs `pg_dump -Fc`, and streams it to R2 by multipart upload.
 4. The container sends a signed callback. The Worker updates D1 and fires alerts on failure.
 
@@ -58,14 +58,15 @@ cellar/
     index.ts                   Worker entry: fetch, scheduled, queue
     app.ts                     Hono app: routes and middleware wiring
     env.ts                     Env type
+    globals.d.ts               types ctx.exports for the JobRunner
     middleware/  access.ts  error.ts
-    routes/  targets.ts  backups.ts  restores.ts  alerts.ts  settings.ts  audit-logs.ts  internal.ts
+    routes/  targets.ts  backups.ts  target-jobs.ts  restores.ts  alerts.ts  settings.ts  audit-logs.ts  internal.ts
     db/  schema.ts  client.ts
-    lib/  crypto.ts  redact.ts  r2-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  s3-presign.ts
+    lib/  crypto.ts  redact.ts  r2-key.ts  job-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  settings.ts  s3-presign.ts
     retention/  types.ts  gfs.ts  runner.ts
-    jobs/  dispatch.ts  consumer.ts  callback.ts  sweeper.ts
+    jobs/  types.ts  state.ts  dispatch.ts  payload.ts  consumer.ts  runner-client.ts  callback.ts  sweeper.ts  cron.ts
     alerts/  line.ts  discord.ts  staleness.ts
-    container/  job-runner.ts  (Container class)
+    container/  job-runner.ts  (JobRunner Durable Object + CallbackEntrypoint, native ctx.container API)
   container/                   runner source; image built from the repo root with container/Dockerfile
     Dockerfile  Dockerfile.dockerignore  tsconfig.json  entrypoint.ts  job.ts  pg.ts  redact.ts  process.ts
     s3.ts  upload.ts  tunnel.ts  callback.ts  hmac.ts  jobs/ context.ts test-connection.ts backup.ts restore.ts
@@ -144,8 +145,9 @@ Indexes: `idx_targets_next_run (enabled, next_run_at) WHERE deleted_at IS NULL`;
 | expires_at | text | informational, from last retention run |
 | deleted_at | text | soft delete after R2 object removed |
 | deleted_reason | text | e.g. `retention`, `manual` |
+| last_seq | integer NOT NULL DEFAULT 0 | highest callback `seq` applied; replays are ignored |
 
-Indexes: `idx_backups_target_time (target_id, started_at DESC) WHERE deleted_at IS NULL`; `idx_backups_status (status, heartbeat_at)`; unique `(r2_key)`; unique `(target_id, schedule_slot) WHERE schedule_slot IS NOT NULL`.
+Indexes: `idx_backups_target_time (target_id, started_at DESC) WHERE deleted_at IS NULL`; `idx_backups_status (status, heartbeat_at)`; unique `(r2_key)`; unique `(target_id, schedule_slot) WHERE schedule_slot IS NOT NULL`; unique `(target_id) WHERE status IN ('queued','running')` (`uq_backups_active_target`: one active backup per target).
 
 ### restores
 | column | type | notes |
@@ -162,6 +164,22 @@ Indexes: `idx_backups_target_time (target_id, started_at DESC) WHERE deleted_at 
 
 Indexes: `(destination_target_id, queued_at DESC)`, `(source_backup_id)`, `(status, heartbeat_at)`.
 Every restore also writes an `audit_logs` entry.
+
+### connection_tests
+| column | type | notes |
+|---|---|---|
+| id | text PK | |
+| target_id | text NOT NULL FK targets | |
+| status | text NOT NULL | queued, running, success, failed, timed_out |
+| result_json | text | redacted JSON |
+| error_code | text | |
+| error_message | text | redacted |
+| last_seq | integer NOT NULL DEFAULT 0 | highest callback `seq` applied; replays are ignored |
+| queued_at | text NOT NULL | |
+| started_at, finished_at, heartbeat_at | text | |
+
+Short-lived: finished rows are deleted after 7 days by the sweeper.
+Indexes: unique `uq_connection_tests_active_target (target_id) WHERE status IN ('queued','running')`; `(status, heartbeat_at)`; `(queued_at)`.
 
 ### alert_channels
 | column | type | notes |
@@ -206,7 +224,7 @@ Indexes: `(at DESC)`, `(entity_type, entity_id, at DESC)`.
 | value | text NOT NULL | JSON |
 | updated_at | text NOT NULL | |
 
-Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (max 900), `max_concurrent_jobs` (default `max_instances` - 1, which is 1), `retention_dry_run` (default `true` until the owner turns it off).
+Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (max 900), `max_concurrent_jobs` (default 1, 1 to 10; counts backups only), `retention_dry_run` (default `true` until the owner turns it off).
 
 ## 4. API routes
 
@@ -223,8 +241,9 @@ Secrets are write-only: responses show `connection: { host, port, dbName, user }
 | GET /api/targets/:id | - | `Target` |
 | PATCH /api/targets/:id | partial of POST body; omitted secret fields keep their stored values; each supplied `tunnel` part replaces only that part; `restoreUrl: null` and `projectTag: null` clear; `retention` merges per field; `alertChannelIds` replaces the set when present | `Target` |
 | DELETE /api/targets/:id | - | `204`, soft delete: stops the schedule, keeps R2 data and history. No purge action in v1. |
-| POST /api/targets/:id/test | - | `202 { testId }`. Runs a `test` container job. Poll `GET /api/targets/:id/test/:testId` for `{ status, result?, error? }`. Works on saved targets only. The UI saves a new target with `enabled = false`, then tests, then the user enables it. |
-| POST /api/targets/:id/backup | - | `202 { backupId }` ("Backup now") |
+| POST /api/targets/:id/test | - | `202 { testId }`; 409 if a backup or test is active |
+| GET /api/targets/:id/test/:testId | - | `{ status: "queued"|"running"|"success"|"failed"|"timed_out", result?: { pgServerVersion, dbSizeBytes, hasReadAllData }, error?: { code, message } }` |
+| POST /api/targets/:id/backup | - | `202 { backupId }` ("Backup now"); 409 if a backup is already queued or running |
 | GET /api/targets/:id/backups | `?status&limit&cursor` | `{ items: Backup[], nextCursor }` |
 | GET /api/backups/:id | - | `Backup` |
 | POST /api/backups/:id/download-url | - | `{ url, expiresAt }` presigned R2 GET |
@@ -234,10 +253,10 @@ Secrets are write-only: responses show `connection: { host, port, dbName, user }
 | GET /api/targets/:id/retention-preview | - | `{ keep: id[], delete: id[], reasons }` no side effects |
 | GET /api/alert-channels, POST, PATCH /:id, DELETE /:id | channel body (credentials write-only) | channel |
 | POST /api/alert-channels/:id/test | - | `{ ok }` |
-| GET /api/settings, PUT /api/settings | settings object | settings object |
+| GET /api/settings, PUT /api/settings | partial object, known keys only (400 otherwise); audit `settings.update` | settings object |
 | GET /api/audit-logs | `?entityType&entityId&limit&cursor` | `{ items, nextCursor }` |
 | GET /api/health | - | `{ ok, version }` (unauthenticated; nothing about targets or config; every other `/api` route requires Access) |
-| POST /internal/jobs/callback | signed payload (jobId in body), see section 5 | `200`. Reached via the container outbound handler if the spike confirms it, otherwise via the public URL with an Access bypass for this exact path only. |
+| POST /internal/jobs/callback | signed payload (jobId in body), see section 5 | `200`. Reached through the JobRunner outbound intercept of `http://cellar-callback.internal` (Spike result: INCONCLUSIVE - the outbound intercept is unverified locally; confirm with Docker Desktop or on a deployed Worker); with FALLBACK it is the public URL with an Access bypass for this exact path. |
 
 `Target` fields: id, name, projectTag, dbName, connection (`{ host, port, dbName, user }`), hasRestoreUrl, hasTunnelToken, tunnelHostname, scheduleCron, timezone, enabled, retention, jobDeadlineMinutes, staleAfterHours, alertFailureThreshold, nextRunAt, lastBackupAt, lastStatus, alertChannelIds, stats (`{ backupCount, totalBackupBytes }`, counting only non-deleted success backups), createdAt, updatedAt.
 
@@ -245,17 +264,17 @@ Secrets are write-only: responses show `connection: { host, port, dbName, user }
 
 ### Dispatch
 Queue message (small, under the 128KB limit):
-`{ jobId, type: "test" | "backup" | "restore", targetId, attempt }`.
+`{ jobId, type: "test" | "backup", targetId }` (Phase 7 adds `restore`).
 The consumer loads the target, decrypts secrets in memory only, and starts the container with the payload below.
 
 ### Input payload (Worker to container)
-The container runs `bun run /app/entrypoint.ts` and reads one JSON document from stdin (secrets never in env vars or command-line args). Phase 4 exports `signCallback`, and a contract test pins the payload and signature format so the Worker side (Phase 5) cannot drift from it:
+The JobRunner starts the container with `sleep infinity`, runs the runner with `exec`, and writes this JSON to its stdin. It is never passed in command-line args or env vars: Phase 4 exports `signCallback`, and a contract test pins the payload and signature format so the Worker side (Phase 5) cannot drift from it:
 ```json
 {
   "jobId": "string",
   "type": "test | backup | restore",
-  "callbackUrl": "<outbound-handler host or public Worker URL>/internal/jobs/callback",
-  "jobKey": "base64 32 bytes, per job, derived HMAC(ENCRYPTION_KEY-derived signing key, jobId)",
+  "callbackUrl": "http://cellar-callback.internal/internal/jobs/callback, or CALLBACK_BASE_URL + /internal/jobs/callback",
+  "jobKey": "base64 32 bytes, HMAC(HMAC(ENCRYPTION_KEY, "cellar-job-signing-v1"), jobId)",
   "deadlineAt": "ISO",
   "db": { "url": "postgres://user:pass@127.0.0.1:{localPort}/dbname", "name": "dbname" },
   "tunnel": { "hostname": "db.example.com", "tokenId": "...", "tokenSecret": "...", "localPort": 15432 },
@@ -281,10 +300,12 @@ The R2 S3 credentials are a bucket-scoped R2 token stored as a Worker secret. Th
   "event": "started | progress | succeeded | failed",
   "at": "ISO",
   "seq": 1,
-  "result": { "sizeBytes": 0, "sha256": "hex", "pgServerVersion": "16.3", "durationMs": 0, "partCount": 0 },
+  "result": { "sizeBytes": 0, "sha256": "hex", "pgServerVersion": "16.3", "durationMs": 0, "partCount": 0, "dbSizeBytes": 0, "hasReadAllData": true },
   "error": { "code": "TUNNEL_FAILED | AUTH_FAILED | DUMP_FAILED | UPLOAD_FAILED | DOWNLOAD_FAILED | RESTORE_FAILED | TIMEOUT | INVALID_JOB | UNKNOWN", "message": "redacted" }
 }
 ```
+
+`dbSizeBytes` and `hasReadAllData` appear on test job callbacks only.
 
 Retries resend the same body and `seq` with a fresh timestamp. The Worker must answer 2xx for a `seq` it already applied.
 
@@ -300,7 +321,7 @@ Retries resend the same body and `seq` with a fresh timestamp. The Worker must a
 ```mermaid
 stateDiagram-v2
   [*] --> queued: enqueue
-  queued --> running: container "started" callback
+  queued --> running: consumer claim (atomic, limits checked)
   queued --> failed: start error after retries
   running --> success: "succeeded" callback
   running --> failed: "failed" callback
@@ -319,7 +340,10 @@ Rules:
 - Sweeper (every cron tick):
   - `running` with no heartbeat for 5 minutes, or past its deadline (`started_at + job_deadline_minutes`, default 2 hours), becomes `timed_out`. The sweeper also stops the container.
   - `queued` for more than 1 hour becomes `failed` with `error_code = queue_timeout`. (The diagram's `queued -> timed_out` edge is replaced by this.)
-- The same rules apply to `restores`.
+- The consumer claims a job with one SQL statement that checks the row is `queued`, the global running count is below `max_concurrent_jobs`, and no job of the other type is running for the same target. A refused claim is retried every 30 seconds. The `started` callback only refreshes the heartbeat.
+- Sweeper error codes: `DEADLINE_EXCEEDED`, `HEARTBEAT_LOST`, `queue_timeout`.
+- A target has at most one `queued` or `running` backup and one `queued` or `running` test (partial unique indexes). Cron catch-up: after enqueuing a slot, `next_run_at` becomes the next run after the slot, or after now if that is already past; an active backup defers the slot to the next tick.
+- The same rules apply to `connection_tests` (5 minute deadline). `restores` join in Phase 7.
 - Concurrency: `max_instances` is 2 (configurable). `max_concurrent_jobs` counts scheduled and manual backups only and defaults to `max_instances` - 1, so one instance stays free for a restore or a test connection.
 - Staleness: a target is stale when it has no successful backup within `stale_after_hours`. Default = expected interval of `schedule_cron` + 2h (daily = 26h). The per-target `stale_after_hours` overrides it.
 - On `failed` or `timed_out`, fire `backup_failed` alerts and never delete anything.
@@ -355,7 +379,7 @@ Fallback options, only with owner approval (neither is started by default):
 - A. Worker-side TCP proxy for the container. Likely to hit CPU and duration limits on large dumps, so it is the less preferred option.
 - B. A VM-side agent in the docker-compose stack: it runs `pg_dump` next to Postgres and uploads to R2 itself, and Cellar only schedules and tracks it. This changes the architecture, because Cellar no longer owns the dump process.
 
-Callback path: the container calls the Worker through an outbound handler (`outboundByHost`), which runs inside the Workers runtime. [Container class](https://developers.cloudflare.com/containers/api/container-class/), [Workers connections](https://developers.cloudflare.com/containers/configuration/workers-connections/). Fallback if the spike cannot confirm it: the public route `/internal/jobs/callback` with an Access bypass for that path only. HMAC, timestamp, and replay checks stay in both cases. [uncertain]
+Callback path: the container calls the Worker through an outbound handler (`outboundByHost`), which runs inside the Workers runtime. [Container class](https://developers.cloudflare.com/containers/api/container-class/), [Workers connections](https://developers.cloudflare.com/containers/configuration/workers-connections/). Fallback if the spike cannot confirm it: the public route `/internal/jobs/callback` with an Access bypass for that path only. HMAC, timestamp, and replay checks stay in both cases. [uncertain] Spike result (Phase 5): INCONCLUSIVE, recorded 2026-10-24 with wrangler 4.152.0. The container calls `http://cellar-callback.internal`; the JobRunner registers `interceptOutboundHttp` for that host and forwards to a `CallbackEntrypoint` that calls the Hono app. Unverified: `wrangler dev` under podman could not start its egress sidecar (cloudflare/proxy-everything, `crun: cannot set memory swappiness with cgroupv2`), so the container never ran and neither OUTBOUND_OK nor FALLBACK was observed; confirm with Docker Desktop or on a deployed Worker.
 
 R2 path: the container writes to R2 over the S3 API with a bucket-scoped token, so the dump never passes through a Worker. [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [R2 tokens](https://developers.cloudflare.com/r2/api/tokens/)
 
@@ -371,7 +395,7 @@ Values come from [research-notes.md](./research-notes.md). Re-check before each 
 | Container image storage | 50GB per account | limits | One image, pinned versions. |
 | R2 multipart | parts 5MiB-5GiB, max 10,000 parts, object max 5TiB | [R2 limits](https://developers.cloudflare.com/r2/platform/limits/) | Part size is a config value, default 32MiB (needed to stay under the 256MB local memory test). 32MiB x 10,000 parts = 320,000MiB (about 312GiB, 335GB) per dump. That is far above the largest database today (about 1GB, planned for 3 years). A larger database needs a larger part size. |
 | R2 incomplete uploads | auto-abort after 7 days by default | [lifecycle](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) | Also abort explicitly on failure. Recommended bucket rule, documented but never created by code: abort incomplete multipart uploads after 1 day. Failed or aborted uploads are cleaned up by this rule, not by retention. |
-| Queues | batch default 10 (max 100), msg 128KB, retries default 3, DLQ per consumer | [queues limits](https://developers.cloudflare.com/queues/platform/limits/), [retries](https://developers.cloudflare.com/queues/configuration/batching-retries/) | `max_batch_size: 1`, small messages (ids only). Container work is long, so do not hold the queue handler open: consumer starts the job and returns, and the callback finishes it. |
+| Queues | batch default 10 (max 100), msg 128KB, retries default 3, DLQ per consumer | [queues limits](https://developers.cloudflare.com/queues/platform/limits/), [retries](https://developers.cloudflare.com/queues/configuration/batching-retries/) | `max_batch_size: 1`, small messages (ids only). Container work is long, so do not hold the queue handler open: consumer starts the job and returns, and the callback finishes it. `max_retries` is 100 (the maximum) because a claim refused by the concurrency limit is retried every 30 seconds; the sweeper fails rows queued over 1 hour. |
 | Cron | UTC only; 5/account Free, 250 Paid; up to 15 min config propagation | [cron](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | One cron `* * * * *` does everything. Per-target cron and timezone are computed in code into `next_run_at` (UTC). |
 | D1 | 10GB per DB, 100 bound params, 30s per query, 2MB row | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) | Chunk `IN (...)` lists in retention to under 100 params. Prune audit logs if needed. |
 | Workers | CPU and subrequest limits per invocation | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) | Retention runner handles a bounded number of deletes per tick. |
