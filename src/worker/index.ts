@@ -4,14 +4,16 @@ import { handleJobMessage } from "./jobs/consumer";
 import { runCronTick } from "./jobs/cron";
 import { startJob, stopJob } from "./jobs/runner-client";
 import type { JobMessage } from "./jobs/types";
+import { triggerDailyRetention } from "./retention/triggers";
 
 export { CallbackEntrypoint, JobRunner } from "./container/job-runner";
 
 export default {
   fetch: app.fetch,
 
-  async scheduled(controller, env) {
+  async scheduled(controller, env, ctx) {
     await runCronTick(env, new Date(controller.scheduledTime));
+    ctx.waitUntil(triggerDailyRetention(env, new Date(controller.scheduledTime)));
   },
 
   async queue(batch, env) {
