@@ -3,6 +3,11 @@
   "name": "cellar",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "dist/ui",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/internal/*"]
+  },
   // Placeholder IDs and names. Replace with real values only after the owner approves creating the resources.
   "d1_databases": [
     {
