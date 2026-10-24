@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
@@ -6,6 +6,7 @@ import type { Env } from "../../../src/worker/env";
 import { runCronTick } from "../../../src/worker/jobs/cron";
 import { sweepStaleJobs } from "../../../src/worker/jobs/sweeper";
 import { createTestEnv, resetDb } from "../../helpers/env";
+import { seedChannel } from "../../helpers/alerts-seed";
 import { fakeQueue, insertBackup, insertTarget, insertTest, NOW } from "./fixtures";
 
 let env: Env;
@@ -90,6 +91,37 @@ describe("sweepStaleJobs", () => {
     await sweepStaleJobs(env, NOW, stop);
     expect(await testStatus("ancient")).toBeUndefined();
     expect((await testStatus("recent"))?.status).toBe("success");
+  });
+});
+
+describe("sweepStaleJobs backup alerts", () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const discordBodies = () => fetchSpy.mock.calls.map((call) => String((call[1] as RequestInit).body));
+
+  beforeEach(async () => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
+    await seedChannel(env, "c1", "t1");
+  });
+
+  it("sends one Backup timed out alert when a running backup times out", async () => {
+    await insertBackup(env, "lost", "t1", { status: "running", startedAt: minutesAgo(30), heartbeatAt: minutesAgo(6) });
+    await sweepStaleJobs(env, NOW, stop);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(discordBodies()[0]).toContain("Backup timed out");
+  });
+
+  it("sends one Backup failed alert when a queued backup passes the queue timeout", async () => {
+    await insertBackup(env, "old", "t1", { queuedAt: minutesAgo(61) });
+    await sweepStaleJobs(env, NOW, stop);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(discordBodies()[0]).toContain("Backup failed");
+  });
+
+  it("sends no alert for a finished backup or for a connection test", async () => {
+    await insertBackup(env, "done", "t1", { status: "success", startedAt: minutesAgo(500), heartbeatAt: minutesAgo(500), queuedAt: minutesAgo(500) });
+    await insertTest(env, "slow", "t1", { status: "running", startedAt: minutesAgo(6), heartbeatAt: minutesAgo(0) });
+    await sweepStaleJobs(env, NOW, stop);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

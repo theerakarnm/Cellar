@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { notifyBackupFinished } from "../alerts/notify";
 import { getDb } from "../db/client";
 import { backups, connectionTests, targets } from "../db/schema";
 import type { Env } from "../env";
@@ -81,5 +82,6 @@ export async function failJob(
   const [row] = rows;
   if (!row) return false;
   await db.update(targets).set({ lastStatus: "failed" }).where(eq(targets.id, row.targetId));
+  await notifyBackupFinished(env, jobId);
   return true;
 }

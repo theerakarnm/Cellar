@@ -6,6 +6,7 @@ import type { Env } from "../../../src/worker/env";
 import { enqueueDueBackups, queueConnectionTest, queueManualBackup, scheduleSlot } from "../../../src/worker/jobs/dispatch";
 import type { JobMessage } from "../../../src/worker/jobs/types";
 import { createTestEnv } from "../../helpers/env";
+import { seedChannel } from "../../helpers/alerts-seed";
 import { DUE_SLOT, fakeQueue, insertBackup, insertTarget, NOW } from "./fixtures";
 
 let env: Env;
@@ -105,6 +106,18 @@ describe("enqueueDueBackups", () => {
     expect(await allBackups()).toHaveLength(1);
     expect((await allBackups())[0]).toMatchObject({ id: "crashed", status: "failed", errorCode: "enqueue_failed" });
     expect(await nextRunOf("t1")).toBe("2026-10-24T19:00:00.000Z");
+  });
+
+  it("sends one Backup failed alert when the re-send fails and marks the row failed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
+    const failingEnv = { ...env, JOBS: fakeQueue({ failSend: true }).queue } as Env;
+    await insertTarget(env, "t1");
+    await seedChannel(env, "c1", "t1");
+    await insertBackup(env, "crashed", "t1", { status: "queued", trigger: "schedule", scheduleSlot: DUE_SLOT });
+    await enqueueDueBackups(failingEnv, NOW);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)).toContain("Backup failed");
   });
 
   it("keeps the slot row running when the consumer claims it before the failing re-send", async () => {

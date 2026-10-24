@@ -1,4 +1,5 @@
 import { and, eq, inArray, lt, lte } from "drizzle-orm";
+import { notifyBackupFinished } from "../alerts/notify";
 import { getDb } from "../db/client";
 import { backups, connectionTests, targets } from "../db/schema";
 import type { Env } from "../env";
@@ -59,6 +60,7 @@ export async function sweepStaleJobs(env: Env, now: Date, stop: (jobId: string) 
       .returning({ id: backups.id });
     if (changed.length === 0) continue;
     await db.update(targets).set({ lastStatus: "timed_out" }).where(eq(targets.id, row.targetId));
+    await notifyBackupFinished(env, row.id);
     result.timedOut.push(row.id);
     await stop(row.id);
   }
@@ -90,6 +92,7 @@ export async function sweepStaleJobs(env: Env, now: Date, stop: (jobId: string) 
     .returning({ id: backups.id, targetId: backups.targetId });
   for (const row of staleBackups) {
     await db.update(targets).set({ lastStatus: "failed" }).where(eq(targets.id, row.targetId));
+    await notifyBackupFinished(env, row.id);
     result.queueTimedOut.push(row.id);
   }
   const staleTests = await db

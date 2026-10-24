@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
+import { afterResponse, notifyBackupFinished } from "../alerts/notify";
 import { handleCallback } from "../jobs/callback";
 import { triggerRetentionAfterBackup } from "../retention/triggers";
 
@@ -13,6 +14,9 @@ internal.post("/jobs/callback", async (c) => {
     { timestamp: c.req.header("X-Cellar-Timestamp"), signature: c.req.header("X-Cellar-Signature") },
     new Date(),
   );
+  if (outcome.applied && outcome.type === "backup" && (outcome.event === "succeeded" || outcome.event === "failed")) {
+    await afterResponse(c, notifyBackupFinished(c.env, outcome.jobId));
+  }
   if (outcome.applied && outcome.type === "backup" && outcome.event === "succeeded") {
     c.executionCtx.waitUntil(triggerRetentionAfterBackup(c.env, outcome.targetId));
   }

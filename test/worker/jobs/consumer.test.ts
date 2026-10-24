@@ -10,6 +10,7 @@ import { jobShape, SAMPLE_JOBS } from "../../../container/contract";
 import { updateSettings } from "../../../src/worker/lib/settings";
 import { createTestEnv } from "../../helpers/env";
 import { captureLogs, fakeQueue, insertBackup, insertTarget, insertTest, NOW, SECRETS } from "./fixtures";
+import { seedChannel } from "../../helpers/alerts-seed";
 
 let env: Env;
 let sent: ReturnType<typeof fakeQueue>["sent"];
@@ -139,6 +140,17 @@ describe("handleJobMessage - backup", () => {
     expect(await backupRow("b1")).toMatchObject({ status: "failed", errorCode: "START_FAILED" });
     expect((await getDb(env).select().from(targets).where(eq(targets.id, "t1")))[0]?.lastStatus).toBe("failed");
     expect(msg.ack).toHaveBeenCalledOnce();
+  });
+
+  it("sends one Backup failed alert when START_FAILED is recorded", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
+    await insertTarget(env, "t1");
+    await seedChannel(env, "c1", "t1");
+    await insertBackup(env, "b1", "t1");
+    await handleJobMessage(env, backupMessage("b1"), deps(new Error("no capacity")));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body)).toContain("Backup failed");
   });
 
   it("stops the container before marking START_FAILED when start fails after the runner may have started", async () => {

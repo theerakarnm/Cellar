@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { backups, connectionTests, targets } from "../../../src/worker/db/schema";
 import { getDb } from "../../../src/worker/db/client";
@@ -7,6 +7,7 @@ import { handleCallback, verifyCallbackSignature } from "../../../src/worker/job
 import { app } from "../../../src/worker/app";
 import { SIGNATURE_VECTOR } from "../../../container/contract";
 import { createTestEnv } from "../../helpers/env";
+import { seedChannel } from "../../helpers/alerts-seed";
 import { insertBackup, insertTarget, insertTest, NOW, signedHeaders } from "./fixtures";
 
 let env: Env;
@@ -97,7 +98,7 @@ describe("handleCallback - backup state changes", () => {
         result: { sizeBytes: 123456, sha256: SHA, pgServerVersion: "16.3", durationMs: 4200, partCount: 1 },
       }),
     );
-    expect(outcome).toEqual({ applied: true, type: "backup", event: "succeeded", targetId: "t1" });
+    expect(outcome).toEqual({ applied: true, type: "backup", event: "succeeded", jobId: "b1", targetId: "t1" });
     expect(await backupRow()).toMatchObject({
       status: "success",
       sizeBytes: 123456,
@@ -215,6 +216,60 @@ describe("POST /internal/jobs/callback", () => {
   it("keeps /api routes behind Access while /internal is open", async () => {
     const prod = { ...env, DEV_BYPASS: "" } as Env;
     expect((await app.request("http://localhost/api/targets/t1/backups", {}, prod)).status).toBe(401);
+  });
+});
+
+describe("backup alerts on callback", () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  const postRoute = async (body: string) => {
+    const signed = await signedHeaders(env, JSON.parse(body).jobId, body, Date.now() / 1000);
+    const response = await app.request(
+      "http://localhost/internal/jobs/callback",
+      { method: "POST", body, headers: { "X-Cellar-Timestamp": signed.timestamp, "X-Cellar-Signature": signed.signature } },
+      env,
+    );
+    return { response };
+  };
+  const discordCalls = () => fetchSpy.mock.calls.map((call) => String((call[1] as RequestInit).body));
+
+  beforeEach(async () => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
+    await seedChannel(env, "c1", "t1");
+  });
+
+  it("sends one alert for a failed callback and ignores a replay of it", async () => {
+    const body = event("b1", "failed", 2, { error: { code: "DUMP_FAILED", message: "boom" } });
+    const first = await postRoute(body);
+    expect(first.response.status).toBe(200);
+    expect(await first.response.json()).toEqual({ ok: true, applied: true });
+    expect(discordCalls()).toHaveLength(1);
+    expect(discordCalls()[0]).toContain("Backup failed");
+    expect(await targetRow()).toMatchObject({ consecutiveFailures: 1 });
+
+    const replay = await postRoute(body);
+    expect(await replay.response.json()).toEqual({ ok: true, applied: false });
+    expect(discordCalls()).toHaveLength(1);
+    expect(await targetRow()).toMatchObject({ consecutiveFailures: 1 });
+  });
+
+  it("keeps the callback outcome when the alert send fails", async () => {
+    fetchSpy.mockRejectedValue(new Error("network down"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { response } = await postRoute(event("b1", "failed", 2, { error: { code: "DUMP_FAILED", message: "boom" } }));
+    expect(response.status).toBe(200);
+    expect((await backupRow())?.status).toBe("failed");
+  });
+
+  it("never sends a connection string or password in an alert", async () => {
+    await postRoute(event("b1", "failed", 2, { error: { code: "DUMP_FAILED", message: "dial postgres://app:hunter2@db:5432/shop failed" } }));
+    expect(discordCalls()).toHaveLength(1);
+    expect(discordCalls()[0]).not.toContain("hunter2");
+  });
+
+  it("sends no alert for a succeeded callback", async () => {
+    await postRoute(event("b1", "succeeded", 2, { result: { sizeBytes: 5, sha256: SHA } }));
+    expect((await backupRow())?.status).toBe("success");
+    expect(discordCalls()).toHaveLength(0);
   });
 });
 

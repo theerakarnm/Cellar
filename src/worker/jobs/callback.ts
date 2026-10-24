@@ -39,6 +39,7 @@ export interface CallbackOutcome {
   applied: boolean;
   type: JobType;
   event: CallbackPayload["event"];
+  jobId: string;
   targetId: string;
 }
 
@@ -96,7 +97,7 @@ export async function handleCallback(env: Env, rawBody: string, headers: Callbac
   const [backup] = await db.select({ targetId: backups.targetId }).from(backups).where(eq(backups.id, payload.jobId)).limit(1);
   if (backup) {
     const applied = await applyBackupEvent(db, payload, nowIso);
-    return { applied, type: "backup", event: payload.event, targetId: backup.targetId };
+    return { applied, type: "backup", event: payload.event, jobId: payload.jobId, targetId: backup.targetId };
   }
   const [test] = await db
     .select({ targetId: connectionTests.targetId })
@@ -105,7 +106,7 @@ export async function handleCallback(env: Env, rawBody: string, headers: Callbac
     .limit(1);
   if (test) {
     const applied = await applyTestEvent(db, payload, nowIso);
-    return { applied, type: "test", event: payload.event, targetId: test.targetId };
+    return { applied, type: "test", event: payload.event, jobId: payload.jobId, targetId: test.targetId };
   }
   const [restore] = await db
     .select({ targetId: restores.destinationTargetId })
@@ -114,7 +115,7 @@ export async function handleCallback(env: Env, rawBody: string, headers: Callbac
     .limit(1);
   if (restore) {
     const applied = (await handleRestoreCallback(db, payload, now)) === "applied";
-    return { applied, type: "restore", event: payload.event, targetId: restore.targetId };
+    return { applied, type: "restore", event: payload.event, jobId: payload.jobId, targetId: restore.targetId };
   }
   throw new ApiError(404, "not_found", "Unknown job");
 }
