@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { S3Client, S3Error, signRequest } from "../s3";
 import { startFakeS3, type FakeS3 } from "./helpers/fake-s3";
 
@@ -81,5 +81,65 @@ describe("S3Client multipart", () => {
     expect(s3.requests[0]).toMatchObject({ method: "DELETE" });
     expect(s3.requests[0]?.query.get("uploadId")).toBe("upload-9");
     expect(await (await client.getObject("k")).text()).toBe("object-bytes");
+  });
+});
+
+describe("S3Client retry and abort", () => {
+  let s3: FakeS3;
+
+  beforeEach(async () => {
+    s3 = await startFakeS3();
+  });
+  afterEach(() => s3.close());
+
+  const makeClient = (sleep: (ms: number) => Promise<void>) =>
+    new S3Client({ endpoint: s3.endpoint, bucket: "cellar", region: "auto", accessKeyId: "AKIATEST", secretAccessKey: "secret-key" }, sleep);
+
+  it("does not retry or wait once the caller's signal is aborted", async () => {
+    const sleeps: number[] = [];
+    const client = makeClient(async (ms) => {
+      sleeps.push(ms);
+    });
+    const controller = new AbortController();
+    s3.failWith(() => {
+      controller.abort(new Error("job aborted"));
+      return 503;
+    });
+    await expect(client.createMultipart("k", controller.signal)).rejects.toThrow();
+    expect(sleeps).toEqual([]);
+    expect(s3.requests).toHaveLength(1);
+  });
+
+  it("stops a pending retry delay as soon as the caller aborts", async () => {
+    let releaseSleep: () => void = () => {};
+    const client = makeClient(() => new Promise<void>((resolve) => (releaseSleep = resolve)));
+    const controller = new AbortController();
+    s3.failWith(() => 503);
+    const outcome = client.createMultipart("k", controller.signal).catch((caught: unknown) => caught);
+    await vi.waitFor(() => expect(s3.requests).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort(new Error("job aborted"));
+    expect(await outcome).toEqual(new Error("job aborted"));
+    expect(s3.requests).toHaveLength(1);
+    releaseSleep();
+  });
+
+  it("still retries a 503 when the caller's signal is not aborted", async () => {
+    const client = makeClient(async () => {});
+    const controller = new AbortController();
+    let failures = 1;
+    s3.failWith(() => (failures-- > 0 ? 503 : null));
+    await expect(client.createMultipart("k", controller.signal)).resolves.toBe("upload-1");
+    expect(s3.requests).toHaveLength(2);
+  });
+
+  it("aborts multipart cleanup with a 30 s timeout signal, not the caller's", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await makeClient(async () => {}).abortMultipart("k", "upload-9");
+      expect(timeout).toHaveBeenCalledWith(30_000);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 });

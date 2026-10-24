@@ -133,16 +133,23 @@ export class S3Client {
     return response;
   }
 
-  private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  private async withRetry<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
         return await operation();
       } catch (error) {
         const delay = RETRY_DELAYS_MS[attempt];
-        if (delay === undefined || !isRetryable(error)) throw error;
-        await this.sleep(delay);
+        if (delay === undefined || signal?.aborted || !isRetryable(error)) throw error;
+        await this.pause(delay, signal);
       }
     }
+  }
+
+  /** Waits out a retry delay, but rejects at once if the caller aborts meanwhile. */
+  private async pause(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) return this.sleep(ms);
+    const aborted = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    await Promise.race([this.sleep(ms), aborted]);
   }
 
   async createMultipart(key: string, signal?: AbortSignal): Promise<string> {
@@ -151,7 +158,7 @@ export class S3Client {
       const uploadId = /<UploadId>([^<]+)<\/UploadId>/.exec(text)?.[1];
       if (!uploadId) throw new S3Error(200, "InvalidResponse", "CreateMultipartUpload returned no UploadId");
       return uploadId;
-    });
+    }, signal);
   }
 
   async uploadPart(key: string, uploadId: string, partNumber: number, body: Uint8Array<ArrayBuffer>, signal?: AbortSignal): Promise<CompletedPart> {
@@ -160,7 +167,7 @@ export class S3Client {
       const etag = response.headers.get("etag");
       if (!etag) throw new S3Error(200, "InvalidResponse", `UploadPart ${partNumber} returned no ETag`);
       return { partNumber, etag };
-    });
+    }, signal);
   }
 
   async completeMultipart(key: string, uploadId: string, parts: CompletedPart[], signal?: AbortSignal): Promise<void> {
@@ -171,12 +178,12 @@ export class S3Client {
     await this.withRetry(async () => {
       const text = await (await this.send({ method: "POST", key, query: { uploadId }, body: encoder.encode(xml), signal })).text();
       if (/<Error>/.test(text)) throw new S3Error(200, errorCode(text), "CompleteMultipartUpload failed");
-    });
+    }, signal);
   }
 
-  /** Best effort: callers pass no signal so an aborted job can still clean up. */
+  /** Best effort cleanup: a job abort must not stop it, so it has its own 30 s timeout instead of the caller's signal. */
   async abortMultipart(key: string, uploadId: string): Promise<void> {
-    await this.send({ method: "DELETE", key, query: { uploadId } });
+    await this.send({ method: "DELETE", key, query: { uploadId }, signal: AbortSignal.timeout(30_000) });
   }
 
   async getObject(key: string, signal?: AbortSignal): Promise<Response> {
