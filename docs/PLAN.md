@@ -60,11 +60,11 @@ cellar/
     env.ts                     Env type
     globals.d.ts               types ctx.exports for the JobRunner
     middleware/  access.ts  error.ts
-    routes/  targets.ts  backups.ts  target-jobs.ts  restores.ts  alerts.ts  settings.ts  audit-logs.ts  internal.ts
+    routes/  targets.ts  target-jobs.ts  backup-actions.ts  backup-delete.ts  restores.ts  retention.ts  settings.ts  audit-logs.ts  internal.ts
     db/  schema.ts  client.ts
-    lib/  crypto.ts  redact.ts  r2-key.ts  job-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  settings.ts  s3-presign.ts
+    lib/  crypto.ts  redact.ts  r2-key.ts  job-key.ts  uuidv7.ts  audit.ts  api-error.ts  validate.ts  pagination.ts  settings.ts  restore-rules.ts  s3-presign.ts
     retention/  types.ts  gfs.ts  runner.ts
-    jobs/  types.ts  state.ts  dispatch.ts  payload.ts  consumer.ts  runner-client.ts  callback.ts  sweeper.ts  cron.ts
+    jobs/  types.ts  state.ts  dispatch.ts  payload.ts  consumer.ts  runner-client.ts  callback.ts  sweeper.ts  restore-job.ts  restore-callback.ts  restore-sweeper.ts  cron.ts
     alerts/  line.ts  discord.ts  staleness.ts
     container/  job-runner.ts  (JobRunner Durable Object + CallbackEntrypoint, native ctx.container API)
   container/                   runner source; image built from the repo root with container/Dockerfile
@@ -161,8 +161,10 @@ Indexes: `idx_backups_target_time (target_id, started_at DESC) WHERE deleted_at 
 | is_source_overwrite | integer NOT NULL | 1 when destination is the source database |
 | error_code, error_message | text | redacted |
 | queued_at, started_at, finished_at, heartbeat_at | text | |
+| last_seq | integer NOT NULL DEFAULT 0 | highest callback `seq` applied (replay protection) |
 
-Indexes: `(destination_target_id, queued_at DESC)`, `(source_backup_id)`, `(status, heartbeat_at)`.
+Indexes: `(destination_target_id, queued_at DESC)`, `(source_backup_id)`, `(status, heartbeat_at)`; unique `uq_restores_active_destination (destination_target_id) WHERE status IN ('queued','running')` (one active restore per destination).
+`last_seq` and `uq_restores_active_destination` ship in additive migration `0002_restore_last_seq.sql`.
 Every restore also writes an `audit_logs` entry.
 
 ### connection_tests
@@ -224,7 +226,7 @@ Indexes: `(at DESC)`, `(entity_type, entity_id, at DESC)`.
 | value | text NOT NULL | JSON |
 | updated_at | text NOT NULL | |
 
-Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (max 900), `max_concurrent_jobs` (default 1, 1 to 10; counts backups only), `retention_dry_run` (JSON boolean, default `true` until the owner turns it off; only `false` turns it off), `retention_last_run` (internal, never writable through the API: `{ "date": "YYYY-MM-DD", "dryRun": boolean }`, the local date in `default_timezone` of the last completed daily retention run).
+Keys: `default_timezone` (Asia/Bangkok), `default_retention` (JSON, keep_last 3 / daily 7 / weekly 4 / monthly 6 / max_age_days null), `default_schedule` (`0 2 * * *`), `download_url_ttl_seconds` (integer 1 to 900, default 900), `max_concurrent_jobs` (default 1, 1 to 10; counts backups only), `retention_dry_run` (JSON boolean, default `true` until the owner turns it off; only `false` turns it off), `retention_last_run` (internal, never writable through the API: `{ "date": "YYYY-MM-DD", "dryRun": boolean }`, the local date in `default_timezone` of the last completed daily retention run).
 
 ## 4. API routes
 
@@ -232,6 +234,7 @@ All routes sit under `/api`, require a valid Access JWT (except `GET /api/health
 Errors: `{ "error": { "code": string, "message": string, "details"?: unknown } }` with redacted messages. Codes: `validation_error` (400, `details` is `{ path, message }[]`), `unauthorized` (401), `not_found` (404), `conflict` (409), `internal_error` (500).
 Lists use `?limit&cursor` and return `{ items, nextCursor }`.
 Secrets are write-only: responses show `connection: { host, port, dbName, user }`, `hasRestoreUrl`, and `hasTunnelToken`, never a URL, token, or `*_enc` value.
+R2_REGION (optional env var) sets the SigV4 region for presigned URLs; R2 uses "auto", local RustFS needs us-east-1.
 
 | Method + path | Request | Response |
 |---|---|---|
@@ -246,10 +249,10 @@ Secrets are write-only: responses show `connection: { host, port, dbName, user }
 | POST /api/targets/:id/backup | - | `202 { backupId }` ("Backup now"); 409 if a backup is already queued or running |
 | GET /api/targets/:id/backups | `?status&limit&cursor` | `{ items: Backup[], nextCursor }` |
 | GET /api/backups/:id | - | `Backup` |
-| POST /api/backups/:id/download-url | - | `{ url, expiresAt }` presigned R2 GET |
+| POST /api/backups/:id/download-url | - | `{ url, expiresAt }` SigV4 presigned R2 GET, response `Cache-Control: no-store`, the URL is never logged or audited. Lifetime is `min(settings.download_url_ttl_seconds, 900)` seconds, default 900 (max 15 minutes). Only `success` backups that are not deleted. |
 | POST /api/backups/:id/restore | `{ destinationTargetId, confirmName, acknowledgeOverwrite?: boolean }` | `202 { restoreId, sameDatabase }`. No default destination. `confirmName` must equal the destination target name (always required). When the destination is the source target, `acknowledgeOverwrite: true` is also required (400 otherwise). The destination must have a restore URL (400 otherwise). `409` if the destination has an active backup or restore. Never creates databases in v1. |
 | GET /api/restores, GET /api/restores/:id | `?targetId&limit&cursor` | `{ items: Restore[], nextCursor }` / `Restore` |
-| DELETE /api/backups/:id | `{ confirm: true }` | `204`. Success backups only. Refuses the latest success. Ignores retention dry run (explicit human action). Deletes R2 object first, then soft-deletes in D1 (`deleted_reason = 'manual'`), then writes audit entry `backup.delete`. Errors: `409` for the latest success or a non-success backup, `502 r2_delete_failed` if R2 fails (nothing changes). |
+| DELETE /api/backups/:id | `{ confirm: true }` | `204`. Success backups only. Refuses the latest success. Ignores retention dry run (explicit human action). Deletes R2 object first, then soft-deletes in D1 (`deleted_reason = 'manual'`), then writes audit entry `backup.delete`. Errors: `409` for the latest success or a non-success backup, `409 backup_in_use` while a queued or running restore uses the backup as its source, `502 r2_delete_failed` if R2 fails (nothing changes). |
 | GET /api/targets/:id/retention-preview | - | `{ dryRun, keep: id[], delete: { id, startedAt, sizeBytes, reason }[], reasons }`. No side effects. `reasons` covers kept backups; each deletion has `reason: "no_rule_keeps_it"`. |
 | GET /api/alert-channels, POST, PATCH /:id, DELETE /:id | channel body (credentials write-only) | channel |
 | POST /api/alert-channels/:id/test | - | `{ ok }` |
@@ -343,12 +346,12 @@ Rules:
 - The consumer claims a job with one SQL statement that checks the row is `queued`, the global running count is below `max_concurrent_jobs`, and no job of the other type is running for the same target. A refused claim is retried every 30 seconds. The `started` callback only refreshes the heartbeat.
 - Sweeper error codes: `DEADLINE_EXCEEDED`, `HEARTBEAT_LOST`, `queue_timeout`.
 - A target has at most one `queued` or `running` backup and one `queued` or `running` test (partial unique indexes). Cron catch-up: after enqueuing a slot, `next_run_at` becomes the next run after the slot, or after now if that is already past; an active backup defers the slot to the next tick.
-- The same rules apply to `connection_tests` (5 minute deadline). `restores` join in Phase 7.
-- Concurrency: `max_instances` is 2 (configurable). `max_concurrent_jobs` counts scheduled and manual backups only and defaults to `max_instances` - 1, so one instance stays free for a restore or a test connection.
+- The same rules apply to `connection_tests` (5 minute deadline) and to `restores`. For restores the deadline is `started_at` plus the destination target's `job_deadline_minutes`.
+- Concurrency: `max_instances` is 2 (configurable). `max_concurrent_jobs` counts scheduled and manual backups only and defaults to `max_instances` - 1, so one instance stays free for a restore or a test connection. Restores never count toward `max_concurrent_jobs`.
 - Staleness: a target is stale when it has no successful backup within `stale_after_hours`. Default = expected interval of `schedule_cron` + 2h (daily = 26h). The per-target `stale_after_hours` overrides it.
 - On `failed` or `timed_out`, fire `backup_failed` alerts and never delete anything.
 - Orphan multipart uploads are aborted on failure. The R2 default lifecycle also aborts incomplete uploads after 7 days.
-- Retention: after a successful backup callback and once per local day from the cron, `runRetention` soft-deletes expired `success` backups (R2 object first) and skips soft-deleted targets. `retention_dry_run` (default `true`) logs decisions and deletes nothing.
+- Retention: after a successful backup callback and once per local day from the cron, `runRetention` soft-deletes expired `success` backups (R2 object first) and skips soft-deleted targets. It also skips a backup that a queued or running restore is reading as its source. `retention_dry_run` (default `true`) logs decisions and deletes nothing.
 
 ## 7. Tunnel from Container: chosen approach
 
