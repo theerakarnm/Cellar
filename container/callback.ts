@@ -15,10 +15,13 @@ export interface CallbackClientOptions {
   fetchFn?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Per-attempt fetch timeout. Default 15_000. */
+  timeoutMs?: number;
 }
 
 const TERMINAL_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const OTHER_RETRY_DELAYS_MS = [1000];
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * Sends signed job events. Events go out one at a time in call order, so `seq` is always increasing.
@@ -30,11 +33,13 @@ export class CallbackClient {
   private readonly fetchFn: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  private readonly timeoutMs: number;
 
   constructor(private readonly options: CallbackClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = options.now ?? Date.now;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   /** Resolves true when the Worker accepted the event, false when it was rejected or retries ran out. */
@@ -56,6 +61,8 @@ export class CallbackClient {
           method: "POST",
           headers: { "content-type": "application/json", [TIMESTAMP_HEADER]: timestamp, [SIGNATURE_HEADER]: signature },
           body,
+          // Own short timeout, not the job signal: a hung request must never block the next event.
+          signal: AbortSignal.timeout(this.timeoutMs),
         });
         if (response.ok) return true;
         const retryable = response.status >= 500 || response.status === 429 || response.status === 408;
@@ -70,8 +77,15 @@ export class CallbackClient {
   }
 }
 
-/** Sends a `progress` event every `intervalMs` (30 s). Returns a function that stops it. */
+/** Sends a `progress` event every `intervalMs` (30 s), skipping a tick while the previous call is still pending. Returns a function that stops it. */
 export function startHeartbeat(client: CallbackClient, intervalMs = 30_000): () => void {
-  const timer = setInterval(() => void client.send("progress"), intervalMs);
+  let pending = false;
+  const timer = setInterval(() => {
+    if (pending) return;
+    pending = true;
+    void client.send("progress").finally(() => {
+      pending = false;
+    });
+  }, intervalMs);
   return () => clearInterval(timer);
 }

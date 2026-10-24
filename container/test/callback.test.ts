@@ -85,6 +85,31 @@ describe("CallbackClient", () => {
     expect(await dead.send("progress")).toBe(false);
   });
 
+  it("aborts a hung request after timeoutMs: a terminal event resolves false after 5 attempts", async () => {
+    let attempts = 0;
+    // Aborted requests leave half-open sockets the plain close() waits on, so track and destroy them.
+    const sockets = new Set<import("node:net").Socket>();
+    const hung = createServer(() => {
+      attempts += 1; // headers received, never answered
+    });
+    hung.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
+    const hungUrl = `http://127.0.0.1:${(hung.address() as AddressInfo).port}/cb`;
+    try {
+      const started = Date.now();
+      const c = new CallbackClient({ url: hungUrl, jobId: "job-1", jobKeyBase64: jobKey, timeoutMs: 50, sleep: async () => {} });
+      expect(await c.send("failed")).toBe(false);
+      expect(attempts).toBe(5);
+      expect(Date.now() - started).toBeLessThan(4000);
+    } finally {
+      hung.close();
+      for (const socket of sockets) socket.destroy();
+    }
+  });
+
   it("heartbeat sends progress events until stopped", async () => {
     const c = client();
     const stop = startHeartbeat(c, 20);
@@ -97,5 +122,28 @@ describe("CallbackClient", () => {
     const after = received.length;
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(received.length).toBe(after);
+  });
+
+  it("heartbeat skips a tick while the previous progress call is still pending", async () => {
+    let calls = 0;
+    const hangFetch = Object.assign(
+      async (): Promise<Response> => {
+        calls += 1;
+        return new Promise<Response>(() => {});
+      },
+      { preconnect: () => {} },
+    );
+    const c = new CallbackClient({
+      url: "http://callback.invalid/cb",
+      jobId: "job-1",
+      jobKeyBase64: jobKey,
+      fetchFn: hangFetch,
+      timeoutMs: 50,
+      sleep: async () => {},
+    });
+    const stop = startHeartbeat(c, 20);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    stop();
+    expect(calls).toBe(1);
   });
 });
