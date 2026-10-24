@@ -3,7 +3,7 @@ import { createTargetSchema, updateTargetSchema } from "../../shared/target-sche
 import { paginationQuery } from "../lib/pagination";
 import { parseBody, parseQuery } from "../lib/validate";
 import type { AppEnv } from "../middleware/access";
-import { createTarget, getTarget, listTargets, updateTarget } from "../services/targets";
+import { createTarget, deleteTarget, getTarget, listTargets, updateTarget } from "../services/targets";
 
 export const targetRoutes = new Hono<AppEnv>();
 
@@ -19,6 +19,11 @@ targetRoutes.get("/:id", async (c) => c.json(await getTarget(c.env, c.req.param(
 targetRoutes.patch("/:id", async (c) => {
   const input = await parseBody(c, updateTargetSchema);
   return c.json(await updateTarget(c.env, c.req.param("id"), input, actorOf(c)));
+});
+
+targetRoutes.delete("/:id", async (c) => {
+  await deleteTarget(c.env, c.req.param("id"), actorOf(c));
+  return c.body(null, 204);
 });
 
 function actorOf(c: { get(key: "actorEmail"): string; req: { header(name: string): string | undefined } }) {

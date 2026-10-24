@@ -210,3 +210,13 @@ export async function updateTarget(env: Env, id: string, input: UpdateTargetInpu
   await db.batch(statements);
   return getTarget(env, id);
 }
+
+export async function deleteTarget(env: Env, id: string, actor: Actor): Promise<void> {
+  const db = getDb(env);
+  const row = await requireTarget(db, id);
+  const stamp = new Date().toISOString();
+  await db.batch([
+    db.update(targets).set({ deletedAt: stamp, enabled: false, nextRunAt: null, updatedAt: stamp }).where(eq(targets.id, id)),
+    auditInsert(db, { actor: actor.email, ip: actor.ip, action: "target.delete", entityType: "target", entityId: id, details: { name: row.name } }),
+  ]);
+}
