@@ -9,6 +9,7 @@ import { restoresRoutes } from "./routes/restores";
 import { backupDeleteRoutes } from "./routes/backup-delete";
 import { retentionRoutes } from "./routes/retention";
 import { settingsRoutes } from "./routes/settings";
+import { alertChannelRoutes } from "./routes/alert-channels";
 import { targetJobs } from "./routes/target-jobs";
 import { targetRoutes } from "./routes/targets";
 
@@ -28,4 +29,5 @@ app.route("/api", retentionRoutes);
 app.route("/api", backupDeleteRoutes);
 app.route("/api/backups", backupActions);
 app.route("/api/restores", restoresRoutes);
+app.route("/api/alert-channels", alertChannelRoutes);
 app.route("/internal", internal);
