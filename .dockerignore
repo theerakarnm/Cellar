@@ -1,0 +1,17 @@
+# Wrangler builds the image with the Dockerfile piped on stdin (`-f -`), so no
+# <Dockerfile>.dockerignore applies and only this root file is read.
+# A `docker build -f container/Dockerfile` build prefers container/Dockerfile.dockerignore
+# instead: keep the patterns there in sync with this file.
+# Send only what the image copies: container/ sources and src/worker/lib/redact.ts.
+*
+!container/
+!src/
+container/test/
+container/e2e/
+container/tsconfig.json
+src/*
+!src/worker/
+src/worker/*
+!src/worker/lib/
+src/worker/lib/*
+!src/worker/lib/redact.ts
