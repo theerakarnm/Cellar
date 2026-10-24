@@ -2,9 +2,11 @@
 
 > Every Postgres, aged and kept safe.
 
-**Cellar** is an open source, Cloudflare-native platform that backs up all your self-hosted PostgreSQL databases to Cloudflare R2 from one place. Register a connection, pick a schedule and a retention policy, and Cellar handles the rest: scheduled dumps, automatic cleanup of expired backups, one-click restore, and alerts when something breaks.
+**Cellar** is an open source, Cloudflare-native platform that backs up all your self-hosted PostgreSQL databases to Cloudflare R2 from one place.
+Register a connection, pick a schedule and a retention policy, and Cellar handles the rest: scheduled dumps, automatic cleanup of expired backups, one-click restore, and alerts when something breaks.
 
-> **Status:** early development. APIs, schema, and configuration may change before v1.0.
+> **Status:** early development.
+> APIs, schema, and configuration may change before v1.0.
 
 ---
 
@@ -19,7 +21,8 @@ VM 3: docker-compose -> web + api + postgres
 ...
 ```
 
-Each database lives inside its own compose stack, and nobody backs them up because setting up cron + pg_dump + upload + cleanup on every VM is tedious and easy to forget. When a disk dies, the data is gone.
+Each database lives inside its own compose stack, and nobody backs them up because setting up cron + pg_dump + upload + cleanup on every VM is tedious and easy to forget.
+When a disk dies, the data is gone.
 
 Cellar moves backup into a single control plane:
 
@@ -76,7 +79,8 @@ flowchart LR
 2. The Queue consumer starts a Container job (one running job per database at a time).
 3. The container connects to Postgres through the Tunnel, detects the server version, and streams `pg_dump -Fc` to R2 while computing a sha256 checksum.
 4. The container reports the result (size, checksum, duration, errors) to the Worker via a signed callback.
-5. On success, retention runs for that database. On failure, alerts fire.
+5. On success, retention runs for that database.
+   On failure, alerts fire.
 
 ### Storage layout
 
@@ -177,7 +181,8 @@ Generate an encryption key:
 openssl rand -base64 32
 ```
 
-> **Keep `ENCRYPTION_KEY` safe.** If you lose it, stored connection URLs cannot be decrypted and every database must be re-registered. Backups in R2 are not affected.
+> **Keep `ENCRYPTION_KEY` safe.** If you lose it, stored connection URLs cannot be decrypted and every database must be re-registered.
+> Backups in R2 are not affected.
 
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill in the values.
 
@@ -405,7 +410,8 @@ Any change to retention must include tests.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Contributions are welcome.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 1. Fork the repo and create a branch
 2. Make your change with tests
