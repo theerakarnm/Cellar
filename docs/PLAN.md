@@ -1,6 +1,6 @@
 # Cellar - Implementation Plan
 
-Status: decisions answered by owner (2026-10-24, two rounds). Phase 1 not started. Research facts live in [research-notes.md](./research-notes.md).
+Status: decisions answered by owner (2026-10-24, two rounds). Phases 1-9 are built. Research facts live in [research-notes.md](./research-notes.md).
 Items marked [uncertain] were not confirmed by current docs.
 
 ## 1. Architecture
@@ -71,8 +71,9 @@ cellar/
     Dockerfile  Dockerfile.dockerignore  tsconfig.json  entrypoint.ts  job.ts  pg.ts  redact.ts  process.ts
     s3.ts  upload.ts  tunnel.ts  callback.ts  hmac.ts  jobs/ context.ts test-connection.ts backup.ts restore.ts
     scripts/ tunnel-spike.sh   test/ (Vitest unit tests)   e2e/ (Docker scripts)
-  ui/                          Vite + React SPA (built into dist/ui, served as Static Assets)
-  test/                        Vitest, mirrors src/ (test/worker/, test/shared/)
+  ui/                          Vite + React SPA: index.html, vite.config.ts, tsconfig.json, src/{api,lib,components,pages} (built into dist/ui, served as Static Assets)
+  scripts/  dev.ts             starts wrangler dev (8787) and the Vite dev server (5173, proxies /api and /internal)
+  test/                        Vitest, mirrors src/ (test/worker/, test/shared/), plus test/ui/ for the UI's pure modules
 ```
 
 Notes:
@@ -85,6 +86,7 @@ Notes:
 - `DEV_BYPASS` is honoured only when its value is exactly `"true"` and the request host is `localhost`, `127.0.0.1`, or `[::1]`.
 - Cron and timezone code is in-house in `src/shared/` (no dependency). Retention imports `getZonedParts` from `src/shared/tz.ts`.
 - Connection mode is tunnel only. There is no direct mode.
+- Dev: bun run dev serves the UI at http://localhost:5173 and the API through the Vite proxy; bun run dev:api and bun run dev:ui run them separately; bun run build:ui builds dist/ui; wrangler.jsonc has an assets block with run_worker_first for /api/* and /internal/*.
 
 ## 3. D1 schema (Drizzle, SQLite)
 
@@ -459,7 +461,7 @@ Risks:
 
 Open questions for the owner: none. Items closed: cost ceiling ($10/month), restore without `pg_restore -j`, manual delete confirmed by `{ confirm: true }`, direct mode removed, name reuse after soft delete.
 
-## 11. Phases (unchanged)
+## 11. Phases
 
 1. Scaffold, config, D1 schema, Access middleware, crypto util
 2. Targets CRUD API + audit log
@@ -469,5 +471,5 @@ Open questions for the owner: none. Items closed: cost ceiling ($10/month), rest
 6. Retention runner wired to R2
 7. Restore + download
 8. Alerts (LINE, Discord, staleness)
-9. UI
+9. UI (done)
 10. Docs + OSS files
