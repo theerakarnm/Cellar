@@ -219,14 +219,14 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                   <StatusBadge status={backup.status} />
                 </td>
                 <td data-label="Trigger">{backup.trigger}</td>
-                <td data-label="Size" className="num">
+                <td data-label="Size" className="num size">
                   {formatBytes(backup.sizeBytes)}
                 </td>
                 <td data-label="Duration">{formatDuration(backup.durationMs)}</td>
                 <td data-label="Error">{backup.errorMessage ?? "-"}</td>
-                <td className="row-actions">
+                <td className="cell-actions">
                   {backup.status === "success" ? (
-                    <>
+                    <div className="inline-actions">
                       <button type="button" onClick={() => download(backup)}>
                         Download
                       </button>
@@ -236,7 +236,7 @@ function TargetView({ target, onChanged }: { target: TargetSummary; onChanged: (
                       <button type="button" className="danger" onClick={() => remove(backup)}>
                         Delete
                       </button>
-                    </>
+                    </div>
                   ) : null}
                 </td>
               </tr>

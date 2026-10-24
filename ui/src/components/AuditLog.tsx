@@ -67,14 +67,20 @@ export function AuditLog() {
                   {entry.action}
                 </td>
                 <td data-label="Entity" className="mono">
-                  {entry.entityType}
-                  {entry.entityId ? ` ${entry.entityId.slice(0, 8)}` : ""}
+                  <span title={entry.entityId ?? undefined}>
+                    {entry.entityId ? `${entry.entityType} ${entry.entityId.slice(0, 8)}` : entry.entityType}
+                  </span>
                 </td>
                 <td data-label="Details">
-                  {entry.details ? (
+                  {entry.details || entry.entityId ? (
                     <details>
                       <summary>Show</summary>
-                      <pre>{detailsText(entry.details)}</pre>
+                      {entry.entityId ? (
+                        <p className="mono">
+                          {entry.entityType} {entry.entityId}
+                        </p>
+                      ) : null}
+                      {entry.details ? <pre>{detailsText(entry.details)}</pre> : null}
                     </details>
                   ) : (
                     "-"

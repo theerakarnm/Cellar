@@ -154,7 +154,7 @@ function TargetFormBody({ mode, target, channels }: { mode: "create" | "edit"; t
         <legend>Advanced</legend>
         <div className="grid">
           {number("jobDeadlineMinutes", "Job deadline (min)")}
-          {number("staleAfterHours", "Stale after (hours)", "Blank = schedule interval + 2 h")}
+          {number("staleAfterHours", "Stale after (hours)", "Blank = schedule interval + 2\u00a0h")}
           {number("alertFailureThreshold", "Alert after N consecutive failures")}
         </div>
       </fieldset>

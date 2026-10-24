@@ -74,6 +74,10 @@ tr:last-child td { border-bottom: 0; }
 th.num { text-align: right; }
 tr.row-red td { background: var(--red-bg); }
 .row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.cell-value { min-width: 0; }
+.size { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.cell-actions { white-space: nowrap; }
+.inline-actions { display: flex; gap: 0.4rem; flex-wrap: nowrap; align-items: center; }
 pre { margin: 0.5rem 0 0; white-space: pre-wrap; word-break: break-word; }
 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1.25rem; margin: 1rem 0; }
@@ -107,12 +111,14 @@ dialog::backdrop { background: rgb(15 23 42 / 0.45); }
   table.stack thead { position: absolute; left: -9999px; }
   table.stack { background: transparent; border: 0; }
   table.stack tr { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.75rem; padding: 0.25rem 0; }
-  table.stack td { border: 0; padding: 0.3rem 0.85rem; display: block; text-align: right; overflow-wrap: anywhere; }
-  table.stack td[data-label]::before { content: attr(data-label); float: left; margin-right: 0.75rem; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; }
-  table.stack td::after { content: ""; display: block; clear: both; }
+  table.stack td { border: 0; padding: 0.35rem 0.85rem; display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.75rem; align-items: center; text-align: left; overflow-wrap: anywhere; }
+  table.stack td[data-label]::before { content: attr(data-label); color: var(--muted); font-size: 0.8rem; text-transform: uppercase; }
+  table.stack td:not([data-label]) { grid-template-columns: minmax(0, 1fr); }
+  table.stack td.cell-actions { padding-top: 0.5rem; }
   table.stack tr.row-red { background: var(--red-bg); }
   table.stack tr.row-red td { background: transparent; }
+  table.stack .cell-value { min-width: 0; }
+  table.stack .inline-actions { flex-wrap: wrap; justify-content: flex-start; }
   .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dd { margin-bottom: 0.6rem; }
-  table.stack td.row-actions { display: flex; justify-content: flex-end; }
 }

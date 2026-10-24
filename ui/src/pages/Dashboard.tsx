@@ -7,6 +7,10 @@ import { formatBytes } from "../lib/display";
 import { classifyTarget, isRedHealth } from "../lib/status";
 import { formatInTimeZone, formatRelative } from "../lib/time";
 
+function plural(count: number, singular: string): string {
+  return count === 1 ? `${count} ${singular}` : `${count} ${singular}s`;
+}
+
 export function Dashboard() {
   const targets = useLoad(() => listAll<TargetSummary>("/api/targets"), [], () => 30_000);
   const now = new Date();
@@ -25,7 +29,7 @@ export function Dashboard() {
           <section className="summary" aria-label="Summary">
             <div>
               <strong>{rows.length}</strong>
-              <span>targets</span>
+              <span>{rows.length === 1 ? "target" : "targets"}</span>
             </div>
             <div className={problems > 0 ? "summary-red" : ""}>
               <strong>{problems}</strong>
@@ -56,23 +60,35 @@ export function Dashboard() {
                 {rows.map(({ target, health }) => (
                   <tr key={target.id} className={isRedHealth(health) ? "row-red" : ""}>
                     <td data-label="Target">
-                      <Link to={`/targets/${target.id}`}>{target.name}</Link>
-                      {target.projectTag ? <span className="tag">{target.projectTag}</span> : null}
+                      <div className="cell-value">
+                        <Link to={`/targets/${target.id}`}>{target.name}</Link>
+                        {target.projectTag ? <span className="tag">{target.projectTag}</span> : null}
+                      </div>
                     </td>
                     <td data-label="Health">
-                      <HealthBadge health={health} />
+                      <div className="cell-value">
+                        <HealthBadge health={health} />
+                      </div>
                     </td>
                     <td data-label="Last status">
-                      <StatusBadge status={target.lastStatus} />
+                      <div className="cell-value">
+                        <StatusBadge status={target.lastStatus} />
+                      </div>
                     </td>
                     <td data-label="Last success">
-                      {formatInTimeZone(target.lastBackupAt, target.timezone)}
-                      <span className="muted block">{formatRelative(target.lastBackupAt, now)}</span>
+                      <div className="cell-value">
+                        {formatInTimeZone(target.lastBackupAt, target.timezone)}
+                        <span className="muted block">{formatRelative(target.lastBackupAt, now)}</span>
+                      </div>
                     </td>
-                    <td data-label="Next run">{target.enabled ? formatInTimeZone(target.nextRunAt, target.timezone) : "-"}</td>
-                    <td data-label="R2 size" className="num">
-                      {formatBytes(target.stats.totalBackupBytes)}
-                      <span className="muted block">{target.stats.backupCount} backups</span>
+                    <td data-label="Next run">
+                      <div className="cell-value">{target.enabled ? formatInTimeZone(target.nextRunAt, target.timezone) : "-"}</div>
+                    </td>
+                    <td data-label="R2 size" className="num size">
+                      <div className="cell-value">
+                        {formatBytes(target.stats.totalBackupBytes)}
+                        <span className="muted block">{plural(target.stats.backupCount, "backup")}</span>
+                      </div>
                     </td>
                   </tr>
                 ))}
